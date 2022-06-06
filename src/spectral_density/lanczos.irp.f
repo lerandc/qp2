@@ -4,10 +4,10 @@
 !
 !
 
-subroutine lancoz_tridiag_c(H, u0, alpha, beta, k, sze)
+subroutine lanczos_tridiag_c(H, u0, alpha, beta, k, sze)
     implicit none
     BEGIN_DOC
-    ! Function that performs lancoz triadiaglonization of a hermitian matrix
+    ! Function that performs lanczos triadiaglonization of a hermitian matrix
     ! Takes H matrix and u initial vector as inputs
     ! Outputs triadiagonlized Hermitian matrix as alpha and beta vectors
     ! Outputs up to k elements of tridiagonlization
@@ -58,10 +58,10 @@ subroutine lancoz_tridiag_c(H, u0, alpha, beta, k, sze)
 
 end
 
-subroutine lancoz_tridiag_reortho_c(H, u0, alpha, beta, k, sze)
+subroutine lanczos_tridiag_reortho_c(H, u0, alpha, beta, k, sze)
     implicit none
     BEGIN_DOC
-    ! Function that performs lancoz triadiaglonization of a hermitian matrix
+    ! Function that performs lanczos triadiaglonization of a hermitian matrix
     ! Performs reorthogonalization of intermediate vectors
     ! Outputs triadiagonlized Hermitian matrix as alpha and beta vectors
     ! Outputs up to k elements of tridiagonlization
@@ -125,10 +125,10 @@ end
 !
 
 
-subroutine lancoz_tridiag_r(H, u0, alpha, beta, k, sze)
+subroutine lanczos_tridiag_r(H, u0, alpha, beta, k, sze)
     implicit none
     BEGIN_DOC
-    ! Function that performs lancoz triadiaglonization of a hermitian matrix
+    ! Function that performs lanczos triadiaglonization of a hermitian matrix
     ! Takes H matrix and u initial vector as inputs
     ! Outputs triadiagonlized Hermitian matrix as alpha and beta vectors
     ! Outputs up to k elements of tridiagonlization
@@ -178,10 +178,10 @@ subroutine lancoz_tridiag_r(H, u0, alpha, beta, k, sze)
 
 end
 
-subroutine lancoz_tridiag_reortho_r(H, u0, alpha, beta, k, sze)
+subroutine lanczos_tridiag_reortho_r(H, u0, alpha, beta, k, sze)
     implicit none
     BEGIN_DOC
-    ! Function that performs lancoz triadiaglonization of a hermitian matrix
+    ! Function that performs lanczos triadiaglonization of a hermitian matrix
     ! Performs reorthogonalization of intermediate vectors
     ! Outputs triadiagonlized Hermitian matrix as alpha and beta vectors
     ! Outputs up to k elements of tridiagonlization
