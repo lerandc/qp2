@@ -3,11 +3,13 @@ program spectral_density
     BEGIN_DOC
     ! Program that calculates the spectral density.
     END_DOC
-    print *, spectral_density_test
-
+    !print *, cfraction_test
+    print *, lanczos_test
+    print *, lanczos_alpha
+    print *, lanczos_beta
 end
 
-BEGIN_PROVIDER [integer, spectral_density_test]
+BEGIN_PROVIDER [integer, cfraction_test]
     implicit none
     use cfraction
 
@@ -78,5 +80,59 @@ BEGIN_PROVIDER [integer, spectral_density_test]
     print *, test_val
     deallocate(a_c, b_c)
 
-    spectral_density_test = 1
+    cfraction_test = 1
+END_PROVIDER
+
+BEGIN_PROVIDER [integer, lanczos_test]
+&BEGIN_PROVIDER [double precision, lanczos_alpha, (lanczos_N)]
+&BEGIN_PROVIDER [double precision, lanczos_beta, (lanczos_N)]
+    implicit none
+    lanczos_test = 23
+
+    !!! Real tests
+    integer                       :: k, sze, i
+    double precision, allocatable :: H(:,:), uu(:,:), uu_h(:,:), Q(:,:), u(:), alpha(:), beta(:)
+    double precision                :: dnrm2
+
+    sze = 100
+    k = 100
+    allocate(H(sze,sze), uu(sze,sze), uu_h(sze,sze), Q(sze, sze), u(sze), alpha(sze), beta(sze))
+
+    H = 0
+    u = 1.0
+    u(1) = 2.0
+    u = u / dnrm2(sze, u, 1)
+
+    print *, 0.d0
+
+    ! test evals spans -1000,1000
+    ! logspaced
+
+    ! set the exponents first
+    do i = 1, sze-1
+        H(i,i) = sze - i + 1
+        print *, i, H(i,i)
+    end do
+
+    ! print *, H
+
+    ! call lanczos_tridiag_r(H, u, alpha, beta, k, sze)
+
+    ! print *, "-----------"
+    ! do i = 1, sze
+    !     print *, alpha(i), beta(i)
+    ! end do 
+
+
+    call lanczos_tridiag_reortho_r(H, u, uu, alpha, beta, k, sze)
+
+    ! print *, "-----------"
+    ! do i = 1, sze
+    !     print *, alpha(i), beta(i)
+    ! end do 
+
+    lanczos_alpha = alpha
+    lanczos_beta = beta
+
+    !!! Complex tests
 END_PROVIDER
