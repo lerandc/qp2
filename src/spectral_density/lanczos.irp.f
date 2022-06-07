@@ -82,25 +82,25 @@ subroutine lanczos_tridiag_reortho_c(H, u0, alpha, beta, k, sze)
     allocate (z(sze), uu(sze, k))
 
     ! initialize vectors
-    uu(:,1) = u0
+    uu(1,:) = u0
     alpha = (0.d0, 0.d0)
     beta = 0.d0
     
     do i = 1, k
-        z = 0
-        call zhemv('U', sze, (1.d0,0.d0), H, sze, uu(:,i), incx, (1.d0,0.d0), z, incy)
-        alpha(i) = zdotc(sze, z, incx, uu(:,i), incy)
+        z = (0.d0, 0.d0)
+        call zhemv('U', sze, (1.d0,0.d0), H, sze, uu(i,:), incx, (0.d0,0.d0), z, incy)
+        alpha(i) = zdotc(sze, z, incx, uu(i,:), incy)
 
         if (i == k) then
             exit
         end if
 
         do ii = 1, 2 ! repeat process twice
-            do j = 1, i-1
+            do j = 1, i
                 ! TODO: check to make sure that this loop can be done in this way, i.e., that the sum need not be completed before subtracting from z
                 ! in exact arithmetic, it is equivalent; does order matter for roundoff?
-                coef = zdotc(sze, z, incx, uu(:, j), incy)
-                z = z - coef * uu(:,i)
+                coef = zdotc(sze, z, incx, uu(j,:), incy)
+                z = z - coef * uu(j,:)
             enddo
         enddo 
 
@@ -111,7 +111,7 @@ subroutine lanczos_tridiag_reortho_c(H, u0, alpha, beta, k, sze)
             exit
         end if
 
-        uu(:, i+1) = z / beta(i+1)
+        uu(i+1,:) = z / beta(i+1)
     enddo
 
     deallocate(z, uu)
@@ -125,7 +125,7 @@ end
 !
 
 
-subroutine lanczos_tridiag_r(H, u0, alpha, beta, k, sze)
+subroutine lanczos_tridiag_r(H, u0, uu, alpha, beta, k, sze)
     implicit none
     BEGIN_DOC
     ! Function that performs lanczos triadiaglonization of a hermitian matrix
@@ -138,7 +138,7 @@ subroutine lanczos_tridiag_r(H, u0, alpha, beta, k, sze)
     integer                         :: i, incx, incy
     double precision, intent(in)    :: H(sze, sze), u0(sze)
     double precision, allocatable   :: z(:), u(:), v(:) 
-    double precision, intent(out)   :: alpha(k), beta(k)
+    double precision, intent(out)   :: alpha(k), beta(k), uu(sze,k)
     double precision                :: ddot
     double precision                :: dnrm2
     
@@ -149,13 +149,14 @@ subroutine lanczos_tridiag_r(H, u0, alpha, beta, k, sze)
 
     ! initialize vectors
     u = u0
+    uu(1,:) = u0
     v = 0.d0
     alpha = 0.d0
     beta = 0.d0
     
     do i = 1, k
         z = 0
-        call dsymv('U', sze, 1.d0, H, sze, u, incx, 1.d0, z, incy)
+        call dsymv('U', sze, 1.d0, H, sze, u, incx, 0.d0, z, incy)
         alpha(i) = ddot(sze, z, incx, u, incy)
         
         if (i == k) then
@@ -172,6 +173,7 @@ subroutine lanczos_tridiag_r(H, u0, alpha, beta, k, sze)
 
         v = u
         u = z / beta(i+1)
+        uu(i+1,:) = u
     enddo
 
     deallocate(z, u, v)
@@ -201,25 +203,25 @@ subroutine lanczos_tridiag_reortho_r(H, u0, uu, alpha, beta, k, sze)
     allocate (z(sze))
 
     ! initialize vectors
-    uu(:,1) = u0
+    uu(1,:) = u0
     alpha = 0.d0
     beta = 0.d0
     
     do i = 1, k
         z = 0
-        call dsymv('U', sze, (1.d0,0.d0), H, sze, uu(:,i), incx, (1.d0,0.d0), z, incy)
-        alpha(i) = ddot(sze, z, incx, uu(:,i), incy)
+        call dsymv('U', sze, 1.d0, H, sze, uu(i,:), incx, 0.d0, z, incy)
+        alpha(i) = ddot(sze, z, incx, uu(i,:), incy)
 
         if (i == k) then
             exit
         end if
 
         do ii = 1, 2 ! repeat process twice
-            do j = 1, i-1
+            do j = 1, i
                 ! TODO: check to make sure that this loop can be done in this way, i.e., that the sum need not be completed before subtracting from z
                 ! in exact arithmetic, it is equivalent; does order matter for roundoff?
-                coef = ddot(sze, z, incx, uu(:, j), incy)
-                z = z - coef * uu(:,i)
+                coef = ddot(sze, z, incx, uu(j,:), incy)
+                z = z - coef * uu(j,:)
             enddo
         enddo 
         
@@ -229,7 +231,7 @@ subroutine lanczos_tridiag_reortho_r(H, u0, uu, alpha, beta, k, sze)
             exit
         end if
 
-        uu(:, i+1) = z / beta(i+1)
+        uu(i+1,:) = z / beta(i+1)
     enddo
 
     deallocate(z)

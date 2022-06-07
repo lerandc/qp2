@@ -4,9 +4,13 @@ program spectral_density
     ! Program that calculates the spectral density.
     END_DOC
     !print *, cfraction_test
-    print *, lanczos_test
-    print *, lanczos_alpha
-    print *, lanczos_beta
+    ! print *, lanczos_alpha
+    ! print *, lanczos_beta
+    call ezfio_set_spectral_density_lanczos_alpha(lanczos_alpha)
+    call ezfio_set_spectral_density_lanczos_beta(lanczos_beta)
+    call ezfio_set_spectral_density_lanczos_basis(lanczos_basis)
+    call ezfio_set_spectral_density_lanczos_tri_H(lanczos_tri_H)
+
 end
 
 BEGIN_PROVIDER [integer, cfraction_test]
@@ -83,38 +87,36 @@ BEGIN_PROVIDER [integer, cfraction_test]
     cfraction_test = 1
 END_PROVIDER
 
-BEGIN_PROVIDER [integer, lanczos_test]
-&BEGIN_PROVIDER [double precision, lanczos_alpha, (lanczos_N)]
+BEGIN_PROVIDER [double precision, lanczos_alpha, (lanczos_N)]
+&BEGIN_PROVIDER [double precision, lanczos_alpha_complex, (2, lanczos_N)]
 &BEGIN_PROVIDER [double precision, lanczos_beta, (lanczos_N)]
+&BEGIN_PROVIDER [double precision, lanczos_basis, (lanczos_N, lanczos_N)]
+&BEGIN_PROVIDER [double precision, lanczos_basis_complex, (2, lanczos_N, lanczos_N)]
+&BEGIN_PROVIDER [double precision, lanczos_tri_H, (lanczos_N, lanczos_N)]
     implicit none
-    lanczos_test = 23
 
     !!! Real tests
-    integer                       :: k, sze, i
-    double precision, allocatable :: H(:,:), uu(:,:), uu_h(:,:), Q(:,:), u(:), alpha(:), beta(:)
-    double precision                :: dnrm2
+    integer                       :: k, sze, i, j
+    double precision, allocatable :: H(:,:), tH(:,:), uu(:,:), Q(:,:), u(:), alpha(:), beta(:)
+    double precision              :: dnrm2, err
 
-    sze = 100
-    k = 100
-    allocate(H(sze,sze), uu(sze,sze), uu_h(sze,sze), Q(sze, sze), u(sze), alpha(sze), beta(sze))
+    sze = lanczos_N
+    k = lanczos_N
+    allocate(H(sze,sze), tH(sze, sze), uu(sze,sze), Q(sze, sze), u(sze), alpha(sze), beta(sze))
 
     H = 0
+    tH = 0
+    Q = 0
     u = 1.0
     u(1) = 2.0
     u = u / dnrm2(sze, u, 1)
 
     print *, 0.d0
 
-    ! test evals spans -1000,1000
-    ! logspaced
-
-    ! set the exponents first
-    do i = 1, sze-1
-        H(i,i) = sze - i + 1
-        print *, i, H(i,i)
+    do i = 1, sze
+        H(i,i) = i
+        ! print *, i, H(i,i)
     end do
-
-    ! print *, H
 
     ! call lanczos_tridiag_r(H, u, alpha, beta, k, sze)
 
@@ -123,16 +125,47 @@ BEGIN_PROVIDER [integer, lanczos_test]
     !     print *, alpha(i), beta(i)
     ! end do 
 
-
     call lanczos_tridiag_reortho_r(H, u, uu, alpha, beta, k, sze)
 
-    ! print *, "-----------"
-    ! do i = 1, sze
-    !     print *, alpha(i), beta(i)
-    ! end do 
+    print *, "Lanczos algorithm complete"
+    ! form tridiagonal matrix, and check to make sure Q vectors are calculated correctly
+    
+    tH = 0 
+    do i = 1, sze
+        tH(i,i) = alpha(i)
+        if (i < sze) then 
+            tH(i+1,i) = beta(i+1)
+            tH(i,i+1) = beta(i+1)
+        end if
+    end do
+
+    lanczos_tri_H = tH
+    print *, "Tridiagonal matrix formed"
+    
+    call dgemm('N', 'N', sze, sze, sze, 1.d0, &
+                tH, size(tH, 1), &
+                uu, size(uu, 1), 0.d0, &
+                Q, size(Q, 1))
+
+    call dgemm('T', 'N', sze, sze, sze, 1.d0, &
+                uu, size(uu, 1), &
+                Q, size(Q, 1), 0.d0, & 
+                Q, size(Q, 1))
+
+    print *, "Comparing error between H and Q @ T @ Q.T"
+    
+    err = 0
+    do i = 1, sze
+        do j = 1, sze
+            err += abs(Q(i,j)-H(i,j))
+        end do
+    end do
+
+    print *, err/(sze*sze)
 
     lanczos_alpha = alpha
     lanczos_beta = beta
+    lanczos_basis = uu
 
     !!! Complex tests
 END_PROVIDER
