@@ -10,6 +10,10 @@ program spectral_density
     call ezfio_set_spectral_density_lanczos_beta(lanczos_beta)
     call ezfio_set_spectral_density_lanczos_basis(lanczos_basis)
     call ezfio_set_spectral_density_lanczos_tri_H(lanczos_tri_H)
+    call ezfio_set_spectral_density_lanczos_int_Q(lanczos_int_Q)
+    call ezfio_set_spectral_density_lanczos_Q(lanczos_Q)
+
+
 
 end
 
@@ -93,79 +97,88 @@ BEGIN_PROVIDER [double precision, lanczos_alpha, (lanczos_N)]
 &BEGIN_PROVIDER [double precision, lanczos_basis, (lanczos_N, lanczos_N)]
 &BEGIN_PROVIDER [double precision, lanczos_basis_complex, (2, lanczos_N, lanczos_N)]
 &BEGIN_PROVIDER [double precision, lanczos_tri_H, (lanczos_N, lanczos_N)]
+&BEGIN_PROVIDER [double precision, lanczos_int_Q, (lanczos_N, lanczos_N)]
+&BEGIN_PROVIDER [double precision, lanczos_Q, (lanczos_N, lanczos_N)]
     implicit none
 
     !!! Real tests
-    integer                       :: k, sze, i, j
-    double precision, allocatable :: H(:,:), tH(:,:), uu(:,:), Q(:,:), u(:), alpha(:), beta(:)
-    double precision              :: dnrm2, err
-
+    integer                       :: k, sze, i, j, ii, N_tests
     sze = lanczos_N
     k = lanczos_N
-    allocate(H(sze,sze), tH(sze, sze), uu(sze,sze), Q(sze, sze), u(sze), alpha(sze), beta(sze))
 
-    H = 0
-    tH = 0
-    Q = 0
-    u = 1.0
-    u(1) = 2.0
-    u = u / dnrm2(sze, u, 1)
+    double precision              :: H(lanczos_N,lanczos_N), tH(lanczos_N,lanczos_N), uu(lanczos_N,lanczos_N), Q(lanczos_N,lanczos_N), u(lanczos_N), alpha(lanczos_N), beta(lanczos_N)
+    double precision              :: dnrm2, err, Q_int(lanczos_N, lanczos_N)
 
-    print *, 0.d0
+    N_tests = lanczos_n_tests
 
-    do i = 1, sze
-        H(i,i) = i
-        ! print *, i, H(i,i)
-    end do
+    do ii = 1, N_tests
 
-    ! call lanczos_tridiag_r(H, u, alpha, beta, k, sze)
+        H = 0
+        tH = 0
+        Q = 0
+        u = 1.0
+        u(1) = 2.0
+        u = u / dnrm2(sze, u, 1)
 
-    ! print *, "-----------"
-    ! do i = 1, sze
-    !     print *, alpha(i), beta(i)
-    ! end do 
+        H = lanczos_test_H_r(:,:,ii)
 
-    call lanczos_tridiag_reortho_r(H, u, uu, alpha, beta, k, sze)
+        call lanczos_tridiag_reortho_r(H, u, uu, alpha, beta, k, sze)
 
-    print *, "Lanczos algorithm complete"
-    ! form tridiagonal matrix, and check to make sure Q vectors are calculated correctly
-    
-    tH = 0 
-    do i = 1, sze
-        tH(i,i) = alpha(i)
-        if (i < sze) then 
-            tH(i+1,i) = beta(i+1)
-            tH(i,i+1) = beta(i+1)
-        end if
-    end do
-
-    lanczos_tri_H = tH
-    print *, "Tridiagonal matrix formed"
-    
-    call dgemm('N', 'N', sze, sze, sze, 1.d0, &
-                tH, size(tH, 1), &
-                uu, size(uu, 1), 0.d0, &
-                Q, size(Q, 1))
-
-    call dgemm('T', 'N', sze, sze, sze, 1.d0, &
-                uu, size(uu, 1), &
-                Q, size(Q, 1), 0.d0, & 
-                Q, size(Q, 1))
-
-    print *, "Comparing error between H and Q @ T @ Q.T"
-    
-    err = 0
-    do i = 1, sze
-        do j = 1, sze
-            err += abs(Q(i,j)-H(i,j))
+        ! form tridiagonal matrix, and check to make sure Q vectors are calculated correctly
+        
+        tH = 0 
+        do i = 1, sze
+            tH(i,i) = alpha(i)
+            if (i < sze) then 
+                tH(i+1,i) = beta(i+1)
+                tH(i,i+1) = beta(i+1)
+            end if
         end do
-    end do
 
-    print *, err/(sze*sze)
+        lanczos_tri_H = tH
+        lanczos_basis = uu
+
+
+        call ordered_dgemm(sze, uu, tH, Q, Q_int, 'N', 'T', 'N', 'N')
+
+        lanczos_int_Q = Q_int
+        lanczos_Q = Q
+
+        err = 0
+        do i = 1, sze
+            do j = 1, sze
+                err += abs(Q(i,j)-H(i,j))
+            end do
+        end do
+
+        print *, "error iter ", ii, err/(sze*sze)
+
+        
+    end do
 
     lanczos_alpha = alpha
     lanczos_beta = beta
-    lanczos_basis = uu
 
     !!! Complex tests
 END_PROVIDER
+
+subroutine ordered_dgemm(sze, basis, tH, Q, Q_int, t0, t1, t2, t3)
+    implicit none
+
+    character, intent(in)            :: t0, t1, t2, t3
+    integer, intent(in)              :: sze
+    double precision, intent(in)     :: tH(sze,sze), basis(sze,sze)
+    double precision, intent(inout)  :: Q(sze,sze), Q_int(sze, sze)
+
+
+    call dgemm(t0, t1, sze, sze, sze, 1.d0, &
+                tH, size(tH, 1), &
+                basis, size(basis, 1), 0.d0, &
+                Q_int, size(Q_int, 1))
+
+    call dgemm(t2, t3, sze, sze, sze, 1.d0, &
+                basis, size(basis, 1), &
+                Q_int, size(Q_int, 1), 0.d0, & 
+                Q, size(Q, 1))
+
+end

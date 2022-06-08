@@ -82,14 +82,14 @@ subroutine lanczos_tridiag_reortho_c(H, u0, alpha, beta, k, sze)
     allocate (z(sze), uu(sze, k))
 
     ! initialize vectors
-    uu(1,:) = u0
+    uu(:,1) = u0
     alpha = (0.d0, 0.d0)
     beta = 0.d0
     
     do i = 1, k
         z = (0.d0, 0.d0)
-        call zhemv('U', sze, (1.d0,0.d0), H, sze, uu(i,:), incx, (0.d0,0.d0), z, incy)
-        alpha(i) = zdotc(sze, z, incx, uu(i,:), incy)
+        call zhemv('U', sze, (1.d0,0.d0), H, sze, uu(:,i), incx, (0.d0,0.d0), z, incy)
+        alpha(i) = zdotc(sze, z, incx, uu(:,i), incy)
 
         if (i == k) then
             exit
@@ -99,8 +99,8 @@ subroutine lanczos_tridiag_reortho_c(H, u0, alpha, beta, k, sze)
             do j = 1, i
                 ! TODO: check to make sure that this loop can be done in this way, i.e., that the sum need not be completed before subtracting from z
                 ! in exact arithmetic, it is equivalent; does order matter for roundoff?
-                coef = zdotc(sze, z, incx, uu(j,:), incy)
-                z = z - coef * uu(j,:)
+                coef = zdotc(sze, z, incx, uu(:,j), incy)
+                z = z - coef * uu(:,j)
             enddo
         enddo 
 
@@ -111,7 +111,7 @@ subroutine lanczos_tridiag_reortho_c(H, u0, alpha, beta, k, sze)
             exit
         end if
 
-        uu(i+1,:) = z / beta(i+1)
+        uu(:,i+1) = z / beta(i+1)
     enddo
 
     deallocate(z, uu)
@@ -149,7 +149,7 @@ subroutine lanczos_tridiag_r(H, u0, uu, alpha, beta, k, sze)
 
     ! initialize vectors
     u = u0
-    uu(1,:) = u0
+    uu(:,1) = u0
     v = 0.d0
     alpha = 0.d0
     beta = 0.d0
@@ -173,7 +173,7 @@ subroutine lanczos_tridiag_r(H, u0, uu, alpha, beta, k, sze)
 
         v = u
         u = z / beta(i+1)
-        uu(i+1,:) = u
+        uu(:,i+1) = u
     enddo
 
     deallocate(z, u, v)
@@ -192,7 +192,7 @@ subroutine lanczos_tridiag_reortho_r(H, u0, uu, alpha, beta, k, sze)
     integer, intent(in)             :: k, sze
     integer                         :: i, ii, j, incx, incy
     double precision, intent(in)    :: H(sze, sze), u0(sze)
-    double precision, allocatable   :: z(:)
+    double precision                :: z(sze)
     double precision, intent(out)   :: alpha(k), beta(k), uu(sze,k)
     double precision                :: ddot, coef
     double precision                :: dnrm2
@@ -200,17 +200,17 @@ subroutine lanczos_tridiag_reortho_r(H, u0, uu, alpha, beta, k, sze)
     incx = 1 
     incy = 1
 
-    allocate (z(sze))
+    ! allocate (z(sze))
 
     ! initialize vectors
-    uu(1,:) = u0
+    uu(:,1) = u0
     alpha = 0.d0
     beta = 0.d0
     
     do i = 1, k
         z = 0
-        call dsymv('U', sze, 1.d0, H, sze, uu(i,:), incx, 0.d0, z, incy)
-        alpha(i) = ddot(sze, z, incx, uu(i,:), incy)
+        call dsymv('U', sze, 1.d0, H, sze, uu(:,i), incx, 0.d0, z, incy)
+        alpha(i) = ddot(sze, z, incx, uu(:,i), incy)
 
         if (i == k) then
             exit
@@ -220,21 +220,22 @@ subroutine lanczos_tridiag_reortho_r(H, u0, uu, alpha, beta, k, sze)
             do j = 1, i
                 ! TODO: check to make sure that this loop can be done in this way, i.e., that the sum need not be completed before subtracting from z
                 ! in exact arithmetic, it is equivalent; does order matter for roundoff?
-                coef = ddot(sze, z, incx, uu(j,:), incy)
-                z = z - coef * uu(j,:)
+                coef = ddot(sze, z, incx, uu(:,j), incy)
+                z = z - coef * uu(:,j)
             enddo
         enddo 
         
         beta(i+1) = dnrm2(sze, z, incx)
         if (beta(i+1) < 1e-16) then ! some small number
         ! add some type of escape or warning for beta(i) = 0
+            print *, "escaping early"
             exit
         end if
 
-        uu(i+1,:) = z / beta(i+1)
+        uu(:,i+1) = z / beta(i+1)
     enddo
 
-    deallocate(z)
+    ! deallocate(z)
 
 end
 
