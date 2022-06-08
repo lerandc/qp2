@@ -126,7 +126,7 @@ BEGIN_PROVIDER [double precision, lanczos_alpha, (lanczos_N)]
 
         H = lanczos_test_H_r(:,:,ii)
 
-        call lanczos_tridiag_reortho_r(H, u, uu, alpha, beta, k, sze)
+        call lanczos_tridiag_reortho_rb(H, u, uu, alpha, beta, k, sze)
 
         ! form tridiagonal matrix, and check to make sure Q vectors are calculated correctly
         
@@ -166,7 +166,7 @@ BEGIN_PROVIDER [double precision, lanczos_alpha, (lanczos_N)]
 END_PROVIDER
 
 
-BEGIN_PROVIDER [complex*16, lanczos_alpha_complex, (lanczos_N)]
+BEGIN_PROVIDER [double precision, lanczos_alpha_complex, (lanczos_N)]
 &BEGIN_PROVIDER [double precision, lanczos_beta_complex, (lanczos_N)]
 &BEGIN_PROVIDER [complex*16, lanczos_basis_complex, (lanczos_N,lanczos_N)]
 &BEGIN_PROVIDER [complex*16, lanczos_tri_H_complex, (lanczos_N, lanczos_N)]
@@ -181,8 +181,8 @@ BEGIN_PROVIDER [complex*16, lanczos_alpha_complex, (lanczos_N)]
     sze = lanczos_N
     k = lanczos_N
 
-    complex*16              :: H(lanczos_N,lanczos_N), tH(lanczos_N,lanczos_N), uu(lanczos_N,lanczos_N), Q(lanczos_N,lanczos_N), u(lanczos_N), alpha(lanczos_N), Q_int(lanczos_N, lanczos_N)
-    double precision        :: beta(lanczos_N), dznrm2, err
+    complex*16              :: H(lanczos_N,lanczos_N), tH(lanczos_N,lanczos_N), uu(lanczos_N,lanczos_N), Q(lanczos_N,lanczos_N), u(lanczos_N), Q_int(lanczos_N, lanczos_N)
+    double precision        :: alpha(lanczos_N), beta(lanczos_N), dznrm2, err
 
     N_tests = lanczos_n_tests
 
@@ -199,7 +199,7 @@ BEGIN_PROVIDER [complex*16, lanczos_alpha_complex, (lanczos_N)]
                   lanczos_test_H_c(2,:,:,ii),&
                   kind=16)
 
-        call lanczos_tridiag_reortho_c(H, u, uu, alpha, beta, k, sze)
+        call lanczos_tridiag_reortho_cb(H, u, uu, alpha, beta, k, sze)
 
         lanczos_basis_complex = uu
 
