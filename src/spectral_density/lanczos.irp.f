@@ -58,7 +58,7 @@ subroutine lanczos_tridiag_c(H, u0, alpha, beta, k, sze)
 
 end
 
-subroutine lanczos_tridiag_reortho_c(H, u0, alpha, beta, k, sze)
+subroutine lanczos_tridiag_reortho_c(H, u0, uu, alpha, beta, k, sze)
     implicit none
     BEGIN_DOC
     ! Function that performs lanczos triadiaglonization of a hermitian matrix
@@ -70,8 +70,8 @@ subroutine lanczos_tridiag_reortho_c(H, u0, alpha, beta, k, sze)
     integer, intent(in)             :: k, sze
     integer                         :: i, ii, j, incx, incy
     complex*16, intent(in)          :: H(sze, sze), u0(sze)
-    complex*16, allocatable         :: z(:), uu(:,:)
-    complex*16, intent(out)         :: alpha(k)
+    complex*16                      :: z(sze)
+    complex*16, intent(out)         :: alpha(k), uu(sze,k)
     complex*16                      :: zdotc
     double precision, intent(out)   :: beta(k)
     double precision                :: dznrm2, coef
@@ -79,7 +79,7 @@ subroutine lanczos_tridiag_reortho_c(H, u0, alpha, beta, k, sze)
     incx = 1 
     incy = 1
 
-    allocate (z(sze), uu(sze, k))
+    ! allocate (z(sze), uu(sze, k))
 
     ! initialize vectors
     uu(:,1) = u0
@@ -89,7 +89,7 @@ subroutine lanczos_tridiag_reortho_c(H, u0, alpha, beta, k, sze)
     do i = 1, k
         z = (0.d0, 0.d0)
         call zhemv('U', sze, (1.d0,0.d0), H, sze, uu(:,i), incx, (0.d0,0.d0), z, incy)
-        alpha(i) = zdotc(sze, z, incx, uu(:,i), incy)
+        alpha(i) = zdotc(sze, uu(:,i), incx, z, incy)
 
         if (i == k) then
             exit
@@ -104,7 +104,6 @@ subroutine lanczos_tridiag_reortho_c(H, u0, alpha, beta, k, sze)
             enddo
         enddo 
 
-        
         beta(i+1) = dznrm2(sze, z, incx)
         if (beta(i+1) < 1e-16) then ! some small number
         ! add some type of escape or warning for beta(i) = 0
@@ -114,7 +113,7 @@ subroutine lanczos_tridiag_reortho_c(H, u0, alpha, beta, k, sze)
         uu(:,i+1) = z / beta(i+1)
     enddo
 
-    deallocate(z, uu)
+    ! deallocate(z, uu)
 
 end
 

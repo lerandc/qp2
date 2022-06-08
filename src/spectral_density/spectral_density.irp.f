@@ -6,14 +6,19 @@ program spectral_density
     !print *, cfraction_test
     ! print *, lanczos_alpha
     ! print *, lanczos_beta
-    call ezfio_set_spectral_density_lanczos_alpha(lanczos_alpha)
-    call ezfio_set_spectral_density_lanczos_beta(lanczos_beta)
-    call ezfio_set_spectral_density_lanczos_basis(lanczos_basis)
-    call ezfio_set_spectral_density_lanczos_tri_H(lanczos_tri_H)
-    call ezfio_set_spectral_density_lanczos_int_Q(lanczos_int_Q)
-    call ezfio_set_spectral_density_lanczos_Q(lanczos_Q)
+    ! call ezfio_set_spectral_density_lanczos_alpha(lanczos_alpha)
+    ! call ezfio_set_spectral_density_lanczos_beta(lanczos_beta)
+    ! call ezfio_set_spectral_density_lanczos_basis(lanczos_basis)
+    ! call ezfio_set_spectral_density_lanczos_tri_H(lanczos_tri_H)
+    ! call ezfio_set_spectral_density_lanczos_int_Q(lanczos_int_Q)
+    ! call ezfio_set_spectral_density_lanczos_Q(lanczos_Q)
 
-
+    call ezfio_set_spectral_density_lanczos_alpha_complex(lanczos_alpha_complex)
+    call ezfio_set_spectral_density_lanczos_beta_complex(lanczos_beta_complex)
+    call ezfio_set_spectral_density_lanczos_basis_complex(lanczos_basis_complex)
+    call ezfio_set_spectral_density_lanczos_tri_H_complex(lanczos_tri_H_complex)
+    call ezfio_set_spectral_density_lanczos_int_Q_complex(lanczos_int_Q_complex)
+    call ezfio_set_spectral_density_lanczos_Q_complex(lanczos_Q_complex)
 
 end
 
@@ -92,13 +97,12 @@ BEGIN_PROVIDER [integer, cfraction_test]
 END_PROVIDER
 
 BEGIN_PROVIDER [double precision, lanczos_alpha, (lanczos_N)]
-&BEGIN_PROVIDER [double precision, lanczos_alpha_complex, (2, lanczos_N)]
 &BEGIN_PROVIDER [double precision, lanczos_beta, (lanczos_N)]
 &BEGIN_PROVIDER [double precision, lanczos_basis, (lanczos_N, lanczos_N)]
-&BEGIN_PROVIDER [double precision, lanczos_basis_complex, (2, lanczos_N, lanczos_N)]
 &BEGIN_PROVIDER [double precision, lanczos_tri_H, (lanczos_N, lanczos_N)]
 &BEGIN_PROVIDER [double precision, lanczos_int_Q, (lanczos_N, lanczos_N)]
 &BEGIN_PROVIDER [double precision, lanczos_Q, (lanczos_N, lanczos_N)]
+
     implicit none
 
     !!! Real tests
@@ -159,8 +163,79 @@ BEGIN_PROVIDER [double precision, lanczos_alpha, (lanczos_N)]
     lanczos_alpha = alpha
     lanczos_beta = beta
 
-    !!! Complex tests
 END_PROVIDER
+
+
+BEGIN_PROVIDER [complex*16, lanczos_alpha_complex, (lanczos_N)]
+&BEGIN_PROVIDER [double precision, lanczos_beta_complex, (lanczos_N)]
+&BEGIN_PROVIDER [complex*16, lanczos_basis_complex, (lanczos_N,lanczos_N)]
+&BEGIN_PROVIDER [complex*16, lanczos_tri_H_complex, (lanczos_N, lanczos_N)]
+&BEGIN_PROVIDER [complex*16, lanczos_int_Q_complex, (lanczos_N, lanczos_N)]
+&BEGIN_PROVIDER [complex*16, lanczos_Q_complex, (lanczos_N, lanczos_N)]
+
+    implicit none
+
+    !!! Complex tests
+    integer                       :: k, sze, i, j, ii, N_tests
+    N_tests = lanczos_n_tests
+    sze = lanczos_N
+    k = lanczos_N
+
+    complex*16              :: H(lanczos_N,lanczos_N), tH(lanczos_N,lanczos_N), uu(lanczos_N,lanczos_N), Q(lanczos_N,lanczos_N), u(lanczos_N), alpha(lanczos_N), Q_int(lanczos_N, lanczos_N)
+    double precision        :: beta(lanczos_N), dznrm2, err
+
+    N_tests = lanczos_n_tests
+
+    do ii = 1, N_tests
+        
+        H = (0.0, 0.0)
+        tH = (0.0, 0.0)
+        Q = (0.0, 0.0)
+        u = (1.0, 0.0)
+        u(1) = (2.0, 0.0)
+        u = u / dznrm2(sze, u, 1)
+
+        H = cmplx(lanczos_test_H_c(1,:,:,ii),&
+                  lanczos_test_H_c(2,:,:,ii),&
+                  kind=16)
+
+        call lanczos_tridiag_reortho_c(H, u, uu, alpha, beta, k, sze)
+
+        lanczos_basis_complex = uu
+
+        tH = 0 
+        do i = 1, sze
+            tH(i,i) = alpha(i)
+            if (i < sze) then 
+                tH(i+1,i) = beta(i+1)
+                tH(i,i+1) = beta(i+1)
+            end if
+        end do
+
+        lanczos_tri_H_complex = tH
+
+        call ordered_zgemm(sze, uu, tH, Q, Q_int, 'N', 'C', 'N', 'N')
+        
+        lanczos_Q_complex = Q
+        lanczos_int_Q_complex = Q_int
+
+        err = 0
+        do i = 1, sze
+            do j = 1, sze
+                err += abs(Q(i,j)-H(i,j))
+            end do
+        end do
+
+        print *, "error iter ", ii, err/(sze*sze)
+
+    end do
+
+        
+    lanczos_alpha_complex = alpha
+    lanczos_beta_complex = beta
+
+END_PROVIDER
+
 
 subroutine ordered_dgemm(sze, basis, tH, Q, Q_int, t0, t1, t2, t3)
     implicit none
@@ -182,3 +257,26 @@ subroutine ordered_dgemm(sze, basis, tH, Q, Q_int, t0, t1, t2, t3)
                 Q, size(Q, 1))
 
 end
+
+subroutine ordered_zgemm(sze, basis, tH, Q, Q_int, t0, t1, t2, t3)
+    implicit none
+
+    character, intent(in)            :: t0, t1, t2, t3
+    integer, intent(in)              :: sze
+    complex*16, intent(in)           :: tH(sze,sze), basis(sze,sze)
+    complex*16, intent(inout)        :: Q(sze,sze), Q_int(sze, sze)
+
+
+    call zgemm(t0, t1, sze, sze, sze, (1.d0, 0.d0), &
+                tH, size(tH, 1), &
+                basis, size(basis, 1), (0.d0, 0.d0), &
+                Q_int, size(Q_int, 1))
+
+    call zgemm(t2, t3, sze, sze, sze, (1.d0, 0.d0), &
+                basis, size(basis, 1), &
+                Q_int, size(Q_int, 1), (0.d0, 0.d0), & 
+                Q, size(Q, 1))
+
+end
+
+
