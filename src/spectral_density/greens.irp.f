@@ -50,7 +50,7 @@ BEGIN_PROVIDER [complex*16, greens_A, (greens_omega_N)]
     epsilon = 0.001 ! small, a limit is taken here
     E0 = psi_energy(1)
     ! z = psi_energy(1) + omega + (0.0, 1.0)*epsilon
-    z = greens_omega + (0.0, 1.0)*epsilon
+    z = E0 + (greens_omega + (0.0, 1.0)*epsilon)
 
     ! this could be embarrisingly split across processes
     ! TODO: refresh on OMP directives
@@ -86,14 +86,13 @@ BEGIN_PROVIDER [complex*16, greens_R, (greens_omega_N)]
 
     epsilon = 0.001 ! small, a limit is taken here
     E0 = psi_energy(1)
-    ! z = psi_energy(1) + omega + (0.0, 1.0)*epsilon
-    z = greens_omega + (0.0, 1.0)*epsilon
+    z = E0 - (greens_omega + (0.0, 1.0)*epsilon)
 
     ! this could be embarrisingly split across processes
     ! TODO: refresh on OMP directives
     do i = 1, greens_omega_N
         zalpha = z(i) - alpha
-        greens_R(i) = cfraction_c((0.0, 0.0), bbeta, zalpha, lanczos_N)
+        greens_R(i) = -1.0*cfraction_c((0.0, 0.0), bbeta, zalpha, lanczos_N)
     end do
 
 END_PROVIDER
@@ -128,8 +127,7 @@ BEGIN_PROVIDER [complex*16, greens_A_complex, (greens_omega_N)]
 
     epsilon = 0.001 ! small, a limit is taken here
     E0 = psi_energy(1)
-    ! z = psi_energy(1) + omega + (0.0, 1.0)*epsilon
-    z = greens_omega + (0.0, 1.0)*epsilon
+    z = E0 + (greens_omega + (0.0, 1.0)*epsilon)
 
     ! this could be embarrisingly split across processes
     ! TODO: refresh on OMP directives
@@ -164,14 +162,14 @@ BEGIN_PROVIDER [complex*16, greens_R_complex, (greens_omega_N)]
 
     epsilon = 0.001 ! small, a limit is taken here
     E0 = psi_energy(1)
-    ! z = psi_energy(1) + omega + (0.0, 1.0)*epsilon
-    z = greens_omega + (0.0, 1.0)*epsilon
+    z = E0 - (greens_omega + (0.0, 1.0)*epsilon)
 
+    
     ! this could be embarrisingly split across processes
     ! TODO: refresh on OMP directives
     do i = 1, greens_omega_N
         zalpha = z(i) - alpha
-        greens_R_complex(i) = cfraction_c((0.0, 0.0), bbeta, zalpha, lanczos_N)
+        greens_R_complex(i) = -1.0*cfraction_c((0.0, 0.0), bbeta, zalpha, lanczos_N)
     end do
 
 END_PROVIDER

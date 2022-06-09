@@ -3,9 +3,6 @@ program spectral_density
     BEGIN_DOC
     ! Program that calculates the spectral density.
     END_DOC
-    !print *, cfraction_test
-    ! print *, lanczos_alpha
-    ! print *, lanczos_beta
     ! call ezfio_set_spectral_density_lanczos_alpha(lanczos_alpha)
     ! call ezfio_set_spectral_density_lanczos_beta(lanczos_beta)
     ! call ezfio_set_spectral_density_lanczos_basis(lanczos_basis)
@@ -20,8 +17,57 @@ program spectral_density
     ! call ezfio_set_spectral_density_lanczos_int_Q_complex(lanczos_int_Q_complex)
     ! call ezfio_set_spectral_density_lanczos_Q_complex(lanczos_Q_complex)
 
-    print *, greens_omega
+    ! print *, greens_omega
 end
+
+
+BEGIN_PROVIDER [double precision, spectral_density_A, (greens_omega_N)]
+    implicit none
+
+    double precision :: pi
+
+    pi = acos(-1.0)
+    spectral_density_A = (-1.0/pi) * aimag(greens_A)
+
+END_PROVIDER
+
+BEGIN_PROVIDER [double precision, spectral_density_R, (greens_omega_N)]
+    implicit none
+
+    double precision :: pi
+
+    pi = acos(-1.0)
+    spectral_density_R = (-1.0/pi) * aimag(greens_R)
+
+END_PROVIDER
+
+BEGIN_PROVIDER [double precision, spectral_density_A_complex, (greens_omega_N)]
+    implicit none
+
+    double precision :: pi
+
+    pi = acos(-1.0)
+    spectral_density_A_complex = (-1.0/pi) * aimag(greens_A_complex)
+
+END_PROVIDER
+
+BEGIN_PROVIDER [double precision, spectral_density_R_complex, (greens_omega_N)]
+    implicit none
+
+    double precision :: pi
+
+    pi = acos(-1.0)
+    spectral_density_R_complex = (-1.0/pi) * aimag(greens_R_complex)
+
+END_PROVIDER
+
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!!!!!!!!!!!  Unit tests !!!!!!!!!!!!
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
 
 BEGIN_PROVIDER [integer, cfraction_test]
     implicit none
