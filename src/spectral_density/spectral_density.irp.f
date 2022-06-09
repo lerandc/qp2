@@ -13,13 +13,14 @@ program spectral_density
     ! call ezfio_set_spectral_density_lanczos_int_Q(lanczos_int_Q)
     ! call ezfio_set_spectral_density_lanczos_Q(lanczos_Q)
 
-    call ezfio_set_spectral_density_lanczos_alpha_complex(lanczos_alpha_complex)
-    call ezfio_set_spectral_density_lanczos_beta_complex(lanczos_beta_complex)
-    call ezfio_set_spectral_density_lanczos_basis_complex(lanczos_basis_complex)
-    call ezfio_set_spectral_density_lanczos_tri_H_complex(lanczos_tri_H_complex)
-    call ezfio_set_spectral_density_lanczos_int_Q_complex(lanczos_int_Q_complex)
-    call ezfio_set_spectral_density_lanczos_Q_complex(lanczos_Q_complex)
+    ! call ezfio_set_spectral_density_lanczos_alpha_complex(lanczos_alpha_complex)
+    ! call ezfio_set_spectral_density_lanczos_beta_complex(lanczos_beta_complex)
+    ! call ezfio_set_spectral_density_lanczos_basis_complex(lanczos_basis_complex)
+    ! call ezfio_set_spectral_density_lanczos_tri_H_complex(lanczos_tri_H_complex)
+    ! call ezfio_set_spectral_density_lanczos_int_Q_complex(lanczos_int_Q_complex)
+    ! call ezfio_set_spectral_density_lanczos_Q_complex(lanczos_Q_complex)
 
+    print *, greens_omega
 end
 
 BEGIN_PROVIDER [integer, cfraction_test]
