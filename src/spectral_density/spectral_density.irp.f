@@ -17,7 +17,51 @@ program spectral_density
     ! call ezfio_set_spectral_density_lanczos_int_Q_complex(lanczos_int_Q_complex)
     ! call ezfio_set_spectral_density_lanczos_Q_complex(lanczos_Q_complex)
 
-    ! print *, greens_omega
+    ! logical :: has, read_wf
+    integer :: N_det_read, j, iorb, ispin
+    ! integer(bit_kind), dimension(N_int,2) :: A,B,C, mask
+    ! logical :: force_reads
+
+    ! call ezfio_get_determinants_n_det(N_det_read)
+    ! print *, N_det_read
+
+    ! double precision :: psi_coef_read(N_det, N_states)
+    ! integer(bit_kind)       :: psi_det_read(N_int,2,N_det)
+
+    ! ! print *, shape(psi_coef_read)
+    ! ! print *, shape(psi_det_read)
+    
+    ! call ezfio_get_determinants_psi_coef(psi_coef_read)
+    ! call ezfio_get_determinants_psi_det(psi_det_read)
+
+    ! psi_coef = psi_coef_read
+    ! psi_det = psi_det_read
+    ! force_reads = size(psi_coef, 1) == N_det_read .and.&
+    !               size(psi_det, 3)  == N_det_read
+    ! if(force_reads) then
+    !     print *, spectral_density_A
+    !     print *, '-------------------------'
+    !     print *, spectral_density_R
+    ! end if
+    
+    logical :: force_reads
+    complex*16  :: psi_coef_complex_read(N_det, N_states)
+    integer(bit_kind) :: psi_det_read(N_int,2,N_det)
+
+    call ezfio_get_determinants_n_det(N_det_read)
+    
+    call ezfio_get_determinants_psi_coef_complex(psi_coef_complex_read)
+    call ezfio_get_determinants_psi_det(psi_det_read)
+
+    psi_coef_complex = psi_coef_complex_read
+    psi_det = psi_det_read
+    force_reads = size(psi_coef_complex, 1) == N_det_read .and.&
+                  size(psi_det, 3)  == N_det_read
+    if(force_reads) then
+        print *, spectral_density_A_complex
+        print *, '-------------------------'
+        print *, spectral_density_R_complex
+    end if
 end
 
 

@@ -2,7 +2,7 @@ complex*16 function cfraction_c(a0, a, b, N)
     implicit none
 
     integer, intent(in)     :: N
-    complex*16, intent(in)  :: a0, a(:), b(:)
+    complex*16, intent(in)  :: a0, a(N), b(N)
     complex*16              :: Cn, dC, Dn
     integer                 :: i
 
@@ -27,7 +27,7 @@ double precision function cfraction_r(a0, a, b, N)
     implicit none
 
     integer, intent(in)             :: N
-    double precision, intent(in)    :: a0, a(:), b(:)
+    double precision, intent(in)    :: a0, a(N), b(N)
     double precision                :: Cn, dC, Dn
     integer                         :: i
 
@@ -47,6 +47,3 @@ double precision function cfraction_r(a0, a, b, N)
     return
 
 end function cfraction_r
-
-
-

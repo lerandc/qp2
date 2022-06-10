@@ -27,31 +27,28 @@ END_PROVIDER
 BEGIN_PROVIDER [complex*16, greens_A, (greens_omega_N)]
     implicit none
 
-    double precision        :: alpha(lanczos_N), bbeta(lanczos_N), epsilon
+    double precision        :: alpha(lanczos_N), beta(lanczos_N), epsilon
     double precision        :: psi_coef_excited(N_det, N_states), E0
     integer(bit_kind)       :: det_copy(N_int,2,N_det)
-    complex*16              :: z(greens_omega_N), zalpha(lanczos_N), cfraction_c
-    integer                 :: i
+    complex*16              :: z(greens_omega_N), zalpha(lanczos_N), bbeta(lanczos_N), cfraction_c
+    integer                 :: i, i_ok
 
-    ! psi_coef, h_matrix_all_dets, n_det, lanczos_N, psi_energy
-
-    ! TODO: find the actual a^{dagger} operator
-    call build_A_wavefunction(1,1,det_copy,psi_coef_excited)
+    call build_A_wavefunction(elec_alpha_num+1,1,psi_coef_excited,det_copy)
 
     call lanczos_tridiag_reortho_r(h_matrix_all_dets, psi_coef_excited,&
-                                   alpha, bbeta,&
+                                   alpha, beta,&
                                    lanczos_N, N_det)
 
-    bbeta(1) = 1.0
+    bbeta(1) = (1.0, 0.0)
     do i = 2, lanczos_N
-        bbeta(i) = bbeta(i)**2.0
+        bbeta(i) = beta(i)**2.0
     end do
 
+    
     epsilon = 0.001 ! small, a limit is taken here
     E0 = psi_energy(1)
-    ! z = psi_energy(1) + omega + (0.0, 1.0)*epsilon
     z = E0 + (greens_omega + (0.0, 1.0)*epsilon)
-
+    
     ! this could be embarrisingly split across processes
     ! TODO: refresh on OMP directives
     do i = 1, greens_omega_N
@@ -59,29 +56,30 @@ BEGIN_PROVIDER [complex*16, greens_A, (greens_omega_N)]
         greens_A(i) = cfraction_c((0.0, 0.0), bbeta, zalpha, lanczos_N)
     end do
 
+
 END_PROVIDER
 
 BEGIN_PROVIDER [complex*16, greens_R, (greens_omega_N)]
     implicit none
 
-    double precision        :: alpha(lanczos_N), bbeta(lanczos_N), epsilon
+    double precision        :: alpha(lanczos_N), beta(lanczos_N), epsilon
     double precision        :: psi_coef_excited(N_det, N_states), E0
     integer(bit_kind)       :: det_copy(N_int,2,N_det)
-    complex*16              :: z(greens_omega_N), zalpha(lanczos_N), cfraction_c
+    complex*16              :: z(greens_omega_N), zalpha(lanczos_N), bbeta(lanczos_N), cfraction_c
     integer                 :: i
 
     ! psi_coef, h_matrix_all_dets, n_det, lanczos_N, psi_energy
 
     ! TODO: find the actual a^{dagger} operator
-    call build_R_wavefunction(1,1,det_copy,psi_coef_excited)
+    call build_R_wavefunction(1,1,psi_coef_excited,det_copy)
 
     call lanczos_tridiag_reortho_r(h_matrix_all_dets, psi_coef_excited,&
-                                   alpha, bbeta,&
+                                   alpha, beta,&
                                    lanczos_N, N_det)
 
-    bbeta(1) = 1.0
+    bbeta(1) = (1.0, 0.0)
     do i = 2, lanczos_N
-        bbeta(i) = bbeta(i)**2.0
+        bbeta(i) = beta(i)**2.0
     end do
 
     epsilon = 0.001 ! small, a limit is taken here
@@ -106,23 +104,23 @@ END_PROVIDER
 BEGIN_PROVIDER [complex*16, greens_A_complex, (greens_omega_N)]
     implicit none
 
-    double precision        :: alpha(lanczos_N), bbeta(lanczos_N), epsilon, E0
+    double precision        :: alpha(lanczos_N), beta(lanczos_N), epsilon, E0
     complex*16              :: psi_coef_excited(N_det, N_states) 
     integer(bit_kind)       :: det_copy(N_int,2,N_det)
-    complex*16              :: z(greens_omega_N), zalpha(lanczos_N), cfraction_c
+    complex*16              :: z(greens_omega_N), zalpha(lanczos_N), bbeta(lanczos_N), cfraction_c
     integer                 :: i
 
     ! psi_coef, h_matrix_all_dets, n_det, lanczos_N, psi_energy
 
-    call build_A_wavefunction_complex(1,1,det_copy,psi_coef_excited)
+    call build_A_wavefunction_complex(elec_alpha_num+1,1,psi_coef_excited,det_copy)
 
     call lanczos_tridiag_reortho_c(h_matrix_all_dets_complex, psi_coef_excited,&
-                                   alpha, bbeta,&
+                                   alpha, beta,&
                                    lanczos_N, N_det)
 
     bbeta(1) = 1.0
     do i = 2, lanczos_N
-        bbeta(i) = bbeta(i)**2.0
+        bbeta(i) = beta(i)**2.0
     end do
 
     epsilon = 0.001 ! small, a limit is taken here
@@ -141,23 +139,23 @@ END_PROVIDER
 BEGIN_PROVIDER [complex*16, greens_R_complex, (greens_omega_N)]
     implicit none
 
-    double precision        :: alpha(lanczos_N), bbeta(lanczos_N), epsilon, E0
+    double precision        :: alpha(lanczos_N), beta(lanczos_N), epsilon, E0
     complex*16              :: psi_coef_excited(N_det, N_states) 
     integer(bit_kind)       :: det_copy(N_int,2,N_det)
-    complex*16              :: z(greens_omega_N), zalpha(lanczos_N), cfraction_c
+    complex*16              :: z(greens_omega_N), zalpha(lanczos_N), bbeta(lanczos_N), cfraction_c
     integer                 :: i
 
     ! psi_coef, h_matrix_all_dets, n_det, lanczos_N, psi_energy
 
-    call build_R_wavefunction_complex(1,1,det_copy,psi_coef_excited)
+    call build_R_wavefunction_complex(1,1,psi_coef_excited,det_copy)
 
     call lanczos_tridiag_reortho_c(h_matrix_all_dets_complex, psi_coef_excited,&
-                                   alpha, bbeta,&
+                                   alpha, beta,&
                                    lanczos_N, N_det)
 
     bbeta(1) = 1.0
     do i = 2, lanczos_N
-        bbeta(i) = bbeta(i)**2.0
+        bbeta(i) = beta(i)**2.0
     end do
 
     epsilon = 0.001 ! small, a limit is taken here
@@ -200,7 +198,7 @@ subroutine build_A_wavefunction(i_particle, ispin, coef_out, det_out)
       det_out(:,:,k) = psi_det(:,:,k)
       call add_electron(det_out(1,1,k),i_particle,ispin,i_ok)
       if (i_ok == 1) then
-        call get_phase(psi_det(1,1,k),det_out(1,1,k),phase,N_int)
+        call get_phase_ca(psi_det(1,1,k),i_particle,ispin,phase)
         coef_out(k,:) = phase * coef_out(k,:)
       else
         coef_out(k,:) = 0.d0
@@ -227,7 +225,7 @@ subroutine build_R_wavefunction(i_hole, ispin, coef_out, det_out)
       det_out(:,:,k) = psi_det(:,:,k)
       call remove_electron(det_out(1,1,k),i_hole,ispin,i_ok)
       if (i_ok == 1) then
-        call get_phase(psi_det(1,1,k),det_out(1,1,k),phase,N_int)
+        call get_phase_ca(psi_det(1,1,k),i_hole,ispin,phase)
         coef_out(k,:) = phase * coef_out(k,:)
       else
         coef_out(k,:) = 0.d0
@@ -254,10 +252,10 @@ subroutine build_A_wavefunction_complex(i_particle, ispin, coef_out, det_out)
       det_out(:,:,k) = psi_det(:,:,k)
       call add_electron(det_out(1,1,k),i_particle,ispin,i_ok)
       if (i_ok == 1) then
-        call get_phase(psi_det(1,1,k),det_out(1,1,k),phase,N_int)
+        call get_phase_ca(psi_det(1,1,k),i_particle,ispin,phase)
         coef_out(k,:) = phase * coef_out(k,:)
       else
-        coef_out(k,:) = 0.d0
+        coef_out(k,:) = (0.d0, 0.d0)
         det_out(:,:,k) = psi_det(:,:,k)
       endif
     enddo
@@ -281,10 +279,10 @@ subroutine build_R_wavefunction_complex(i_hole, ispin, coef_out, det_out)
       det_out(:,:,k) = psi_det(:,:,k)
       call remove_electron(det_out(1,1,k),i_hole,ispin,i_ok)
       if (i_ok == 1) then
-        call get_phase(psi_det(1,1,k),det_out(1,1,k),phase,N_int)
+        call get_phase_ca(psi_det(1,1,k),i_hole,ispin,phase)
         coef_out(k,:) = phase * coef_out(k,:)
       else
-        coef_out(k,:) = 0.d0
+        coef_out(k,:) = (0.d0, 0.d0)
         det_out(:,:,k) = psi_det(:,:,k)
       endif
     enddo
@@ -355,3 +353,40 @@ subroutine remove_electron(key_in,i_hole,ispin,i_ok)
     end if
   
   end
+
+
+subroutine get_phase_ca(det, iorb, ispin, phase)
+    implicit none
+
+    integer, intent(in)            :: iorb, ispin
+    integer                        :: N_perm, i,j,k
+    integer(bit_kind), intent(in)  :: det(N_int,2)
+    integer(bit_kind)              :: mask
+    double precision, intent(out)  :: phase
+    double precision, parameter    :: phase_dble(0:1) = (/ 1.d0, -1.d0 /)
+
+    ! ispin = 1  == alpha
+    ! ispin = 2  == beta
+
+    ! If we add an alpha electron, parity is not affected by beta part of determinant
+    ! (only need number of alpha occupied orbs below iorb)
+    
+    ! If we add a beta electron, the parity is affected by alpha part
+    ! (need total number of occupied alpha orbs (all of which come before beta)
+    ! and total number of beta occupied orbs below iorb)
+
+    mask = 2**(iorb - 1) - 1
+    k = shiftr(iorb-1,bit_kind_shift)+1
+
+    ! top of the order
+    N_perm = popcnt(iand(mask, det(k,ispin)))
+
+    ! all necessary orbitals occupied below
+    do i = 1, ispin
+        do j = 1, k-1
+            N_perm = N_perm + popcnt(det(j,i))
+        end do
+    end do
+
+    phase = phase_dble(iand(N_perm, 1))
+end
