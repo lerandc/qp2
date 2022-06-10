@@ -1,10 +1,3 @@
-! get H in det space
-! get wave function with added/removed electron
-! calculate lanczos tridiag
-! square beta vector
-! with a supplied omega range and ground state energy/epsilon, calculate z
-! 
-
 BEGIN_PROVIDER [double precision, greens_omega, (greens_omega_N)]
     implicit none 
     integer                 :: i
@@ -68,9 +61,6 @@ BEGIN_PROVIDER [complex*16, greens_R, (greens_omega_N)]
     complex*16              :: z(greens_omega_N), zalpha(lanczos_N), bbeta(lanczos_N), cfraction_c
     integer                 :: i
 
-    ! psi_coef, h_matrix_all_dets, n_det, lanczos_N, psi_energy
-
-    ! TODO: find the actual a^{dagger} operator
     call build_R_wavefunction(1,1,psi_coef_excited,det_copy)
 
     call lanczos_tridiag_reortho_r(h_matrix_all_dets, psi_coef_excited,&
@@ -110,8 +100,6 @@ BEGIN_PROVIDER [complex*16, greens_A_complex, (greens_omega_N)]
     complex*16              :: z(greens_omega_N), zalpha(lanczos_N), bbeta(lanczos_N), cfraction_c
     integer                 :: i
 
-    ! psi_coef, h_matrix_all_dets, n_det, lanczos_N, psi_energy
-
     call build_A_wavefunction_complex(elec_alpha_num+1,1,psi_coef_excited,det_copy)
 
     call lanczos_tridiag_reortho_c(h_matrix_all_dets_complex, psi_coef_excited,&
@@ -144,8 +132,6 @@ BEGIN_PROVIDER [complex*16, greens_R_complex, (greens_omega_N)]
     integer(bit_kind)       :: det_copy(N_int,2,N_det)
     complex*16              :: z(greens_omega_N), zalpha(lanczos_N), bbeta(lanczos_N), cfraction_c
     integer                 :: i
-
-    ! psi_coef, h_matrix_all_dets, n_det, lanczos_N, psi_energy
 
     call build_R_wavefunction_complex(1,1,psi_coef_excited,det_copy)
 
@@ -183,7 +169,7 @@ END_PROVIDER
 subroutine build_A_wavefunction(i_particle, ispin, coef_out, det_out)
     implicit none
     BEGIN_DOC
-    ! Applies the single excitation operator : a^{dager}_(i_particle) a_(i_hole) of
+    ! Applies the creation operator : a^{dager}_(i_particle) of
     ! spin = ispin to the current wave function (psi_det, psi_coef)
     END_DOC
     integer, intent(in)            :: i_particle,ispin
@@ -210,7 +196,7 @@ end
 subroutine build_R_wavefunction(i_hole, ispin, coef_out, det_out)
     implicit none
     BEGIN_DOC
-    ! Applies the single excitation operator : a^{dager}_(i_hole) a_(i_hole) of
+    ! Applies the annihilation operator: a_(i_hole) of
     ! spin = ispin to the current wave function (psi_det, psi_coef)
     END_DOC
     integer, intent(in)            :: i_hole,ispin
@@ -237,8 +223,8 @@ end
 subroutine build_A_wavefunction_complex(i_particle, ispin, coef_out, det_out)
     implicit none
     BEGIN_DOC
-    ! Applies the single excitation operator : a^{dager}_(i_particle) a_(i_hole) of
-    ! spin = ispin to the current wave function (psi_det, psi_coef)
+    ! Applies the creation operator : a^{dager}_(i_particle) of
+    ! spin = ispin to the current wave function (psi_det, psi_coef_complex)
     END_DOC
     integer, intent(in)            :: i_particle,ispin
     integer(bit_kind), intent(out) :: det_out(N_int,2,N_det)
@@ -264,8 +250,8 @@ end
 subroutine build_R_wavefunction_complex(i_hole, ispin, coef_out, det_out)
     implicit none
     BEGIN_DOC
-    ! Applies the single excitation operator : a^{dager}_(i_hole) a_(i_hole) of
-    ! spin = ispin to the current wave function (psi_det, psi_coef)
+    ! Applies the annihilation operator: a_(i_hole) of
+    ! spin = ispin to the current wave function (psi_det, psi_coef_complex)
     END_DOC
     integer, intent(in)            :: i_hole,ispin
     integer(bit_kind), intent(out) :: det_out(N_int,2,N_det)
@@ -291,7 +277,7 @@ end
 subroutine add_electron(key_in,i_particle,ispin,i_ok)
     implicit none
     BEGIN_DOC
-    ! Apply the single excitation operator : a^{dager}_(i_particle) a_(i_hole) of spin = ispin
+    ! Apply the creation : a^{dager}_(i_particle) of spin = ispin
     ! on key_in
     ! ispin = 1  == alpha
     ! ispin = 2  == beta
@@ -324,7 +310,7 @@ end
 subroutine remove_electron(key_in,i_hole,ispin,i_ok)
     implicit none
     BEGIN_DOC
-    ! Apply the single excitation operator : a^{dager}_(i_particle) a_(i_hole) of spin = ispin
+    ! Apply the annihilation operator : a_(i_hole) of spin = ispin
     ! on key_in
     ! ispin = 1  == alpha
     ! ispin = 2  == beta
@@ -357,6 +343,10 @@ subroutine remove_electron(key_in,i_hole,ispin,i_ok)
 
 subroutine get_phase_ca(det, iorb, ispin, phase)
     implicit none
+    BEGIN_DOC
+    ! Calculate relative phase of determinant after creation/annihilation
+    ! of ispin at iorb
+    END_DOC
 
     integer, intent(in)            :: iorb, ispin
     integer                        :: N_perm, i,j,k
@@ -364,10 +354,6 @@ subroutine get_phase_ca(det, iorb, ispin, phase)
     integer(bit_kind)              :: mask
     double precision, intent(out)  :: phase
     double precision, parameter    :: phase_dble(0:1) = (/ 1.d0, -1.d0 /)
-
-    ! ispin = 1  == alpha
-    ! ispin = 2  == beta
-
     ! If we add an alpha electron, parity is not affected by beta part of determinant
     ! (only need number of alpha occupied orbs below iorb)
     
