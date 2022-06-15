@@ -10,7 +10,6 @@ BEGIN_PROVIDER [double precision, greens_omega, (greens_omega_N)]
 
 END_PROVIDER
 
-
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 !!!!!   Real Implementations   !!!!!
@@ -21,12 +20,15 @@ BEGIN_PROVIDER [complex*16, greens_A, (greens_omega_N)]
     implicit none
 
     double precision        :: alpha(lanczos_N), beta(lanczos_N), epsilon
-    double precision        :: psi_coef_excited(N_det, N_states), E0
+    double precision        :: psi_coef_excited(N_det, N_states), E0, nomr
     integer(bit_kind)       :: det_copy(N_int,2,N_det)
     complex*16              :: z(greens_omega_N), zalpha(lanczos_N), bbeta(lanczos_N), cfraction_c
     integer                 :: i, i_ok
 
     call build_A_wavefunction(elec_alpha_num+1,1,psi_coef_excited,det_copy)
+
+    norm = sum(abs(psi_coef_excited)**2.0)
+    psi_coef_excited = psi_coef_excited / norm
 
     call lanczos_tridiag_reortho_r(h_matrix_all_dets, psi_coef_excited,&
                                    alpha, beta,&
@@ -38,7 +40,7 @@ BEGIN_PROVIDER [complex*16, greens_A, (greens_omega_N)]
     end do
 
     
-    epsilon = 0.001 ! small, a limit is taken here
+    epsilon = 0.01 ! small, a limit is taken here
     E0 = psi_energy(1)
     z = E0 + (greens_omega + (0.0, 1.0)*epsilon)
     
@@ -56,12 +58,15 @@ BEGIN_PROVIDER [complex*16, greens_R, (greens_omega_N)]
     implicit none
 
     double precision        :: alpha(lanczos_N), beta(lanczos_N), epsilon
-    double precision        :: psi_coef_excited(N_det, N_states), E0
+    double precision        :: psi_coef_excited(N_det, N_states), E0, norm
     integer(bit_kind)       :: det_copy(N_int,2,N_det)
     complex*16              :: z(greens_omega_N), zalpha(lanczos_N), bbeta(lanczos_N), cfraction_c
     integer                 :: i
 
-    call build_R_wavefunction(1,1,psi_coef_excited,det_copy)
+    call build_R_wavefunction(elec_alpha_num,1,psi_coef_excited,det_copy)
+
+    norm = sum(abs(psi_coef_excited)**2.0)
+    psi_coef_excited = psi_coef_excited / norm
 
     call lanczos_tridiag_reortho_r(h_matrix_all_dets, psi_coef_excited,&
                                    alpha, beta,&
@@ -72,7 +77,7 @@ BEGIN_PROVIDER [complex*16, greens_R, (greens_omega_N)]
         bbeta(i) = beta(i)**2.0
     end do
 
-    epsilon = 0.001 ! small, a limit is taken here
+    epsilon = 0.01 ! small, a limit is taken here
     E0 = psi_energy(1)
     z = E0 - (greens_omega + (0.0, 1.0)*epsilon)
 
@@ -94,13 +99,16 @@ END_PROVIDER
 BEGIN_PROVIDER [complex*16, greens_A_complex, (greens_omega_N)]
     implicit none
 
-    double precision        :: alpha(lanczos_N), beta(lanczos_N), epsilon, E0
+    double precision        :: alpha(lanczos_N), beta(lanczos_N), epsilon, E0, norm
     complex*16              :: psi_coef_excited(N_det, N_states) 
     integer(bit_kind)       :: det_copy(N_int,2,N_det)
     complex*16              :: z(greens_omega_N), zalpha(lanczos_N), bbeta(lanczos_N), cfraction_c
     integer                 :: i
 
     call build_A_wavefunction_complex(elec_alpha_num+1,1,psi_coef_excited,det_copy)
+
+    norm = sum(abs(psi_coef_excited)**2.0)
+    psi_coef_excited = psi_coef_excited / norm
 
     call lanczos_tridiag_reortho_c(h_matrix_all_dets_complex, psi_coef_excited,&
                                    alpha, beta,&
@@ -111,7 +119,7 @@ BEGIN_PROVIDER [complex*16, greens_A_complex, (greens_omega_N)]
         bbeta(i) = beta(i)**2.0
     end do
 
-    epsilon = 0.001 ! small, a limit is taken here
+    epsilon = 0.01 ! small, a limit is taken here
     E0 = psi_energy(1)
     z = E0 + (greens_omega + (0.0, 1.0)*epsilon)
 
@@ -127,13 +135,16 @@ END_PROVIDER
 BEGIN_PROVIDER [complex*16, greens_R_complex, (greens_omega_N)]
     implicit none
 
-    double precision        :: alpha(lanczos_N), beta(lanczos_N), epsilon, E0
+    double precision        :: alpha(lanczos_N), beta(lanczos_N), epsilon, E0, norm
     complex*16              :: psi_coef_excited(N_det, N_states) 
     integer(bit_kind)       :: det_copy(N_int,2,N_det)
     complex*16              :: z(greens_omega_N), zalpha(lanczos_N), bbeta(lanczos_N), cfraction_c
     integer                 :: i
 
-    call build_R_wavefunction_complex(1,1,psi_coef_excited,det_copy)
+    call build_R_wavefunction_complex(elec_alpha_num,1,psi_coef_excited,det_copy)
+
+    norm = sum(abs(psi_coef_excited)**2.0)
+    psi_coef_excited = psi_coef_excited / norm
 
     call lanczos_tridiag_reortho_c(h_matrix_all_dets_complex, psi_coef_excited,&
                                    alpha, beta,&
@@ -144,7 +155,7 @@ BEGIN_PROVIDER [complex*16, greens_R_complex, (greens_omega_N)]
         bbeta(i) = beta(i)**2.0
     end do
 
-    epsilon = 0.001 ! small, a limit is taken here
+    epsilon = 0.01 ! small, a limit is taken here
     E0 = psi_energy(1)
     z = E0 - (greens_omega + (0.0, 1.0)*epsilon)
 
@@ -153,7 +164,7 @@ BEGIN_PROVIDER [complex*16, greens_R_complex, (greens_omega_N)]
     ! TODO: refresh on OMP directives
     do i = 1, greens_omega_N
         zalpha = z(i) - alpha
-        greens_R_complex(i) = -1.0*cfraction_c((0.0, 0.0), bbeta, zalpha, lanczos_N)
+        greens_R_complex(i) = -1.0*cfraction_c((0.0, 0.0),bbeta, zalpha,lanczos_N)
     end do
 
 END_PROVIDER

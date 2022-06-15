@@ -45,7 +45,7 @@ end
 
 
 ! to convert to provider, provide all 4 array for intel MKL CSR representation
-subroutine form_sparse_H(finished)
+subroutine form_sparse_dH(finished)
     ! use MKL_SPBLAS
 
     implicit none
@@ -62,7 +62,7 @@ subroutine form_sparse_H(finished)
     integer, allocatable :: coo_r_all(:), coo_c_all(:), coo_r_t(:), coo_c_t(:)
     integer :: OMP_get_num_threads, OMP_get_thread_num
     double precision     :: hij, frac
-    double precision, allocatable :: coo_v(:), coo_v_t(:), coo_v_all(:), h_ref(:,:)
+    double precision, allocatable :: coo_v(:), coo_v_t(:), coo_v_all(:)
 
     ! force provide early so that threads don't each try to provide
     call i_H_j(psi_det(1,1,1), psi_det(1,1,1), N_int, hij) 
@@ -71,7 +71,7 @@ subroutine form_sparse_H(finished)
     !$OMP PRIVATE(i,j,k, hij, nnz, ID, coo_r, coo_c, coo_v, coo_r_t, coo_c_t, coo_v_t) 
     !$ n_threads = OMP_get_num_threads()
     !$ ID = OMP_get_thread_num() + 1
-    n = 8
+    n = N_det
     frac = 0.2
     n_vals = max(nint(n*n*frac/n_threads), 128)
 
@@ -81,7 +81,6 @@ subroutine form_sparse_H(finished)
 
     !$OMP SINGLE
     allocate(nnz_arr(n_threads), h_ref(n,n))
-    h_ref = 0.0
     nnz_tot = 0
     !$OMP END SINGLE
     nnz = 0
@@ -97,8 +96,6 @@ subroutine form_sparse_H(finished)
                   coo_r(nnz) = i
                   coo_c(nnz) = j
                   coo_v(nnz) = hij
-                  h_ref(i,j) = hij
-                  h_ref(j,i) = hij
                 else
                   ! dynamically increase array size on thread
                   print *, 'allocating'
@@ -113,8 +110,6 @@ subroutine form_sparse_H(finished)
                   coo_r_t(nnz) = i
                   coo_c_t(nnz) = j
                   coo_v_t(nnz) = hij
-                  h_ref(i,j) = hij
-                  h_ref(j,i) = hij
 
                   call move_alloc(coo_r_t, coo_r)
                   call move_alloc(coo_c_t, coo_c)
@@ -135,7 +130,6 @@ subroutine form_sparse_H(finished)
     !$OMP BARRIER
 
     !$OMP SINGLE
-    print *, nnz_arr
     allocate(coo_r_all(nnz_tot))
     allocate(coo_c_all(nnz_tot))
     allocate(coo_v_all(nnz_tot))
@@ -153,13 +147,6 @@ subroutine form_sparse_H(finished)
     end do
     !$OMP END PARALLEL
 
-    print *, "n: ", n, "nnz: ", 2*nnz_tot-n
-
-    ! do i = 1, nnz_tot
-    !     print *, coo_r_all(i), coo_c_all(i), coo_v_all(i)
-    ! end do
-
-
     ! ! convert to sparse matrix in CSR format
     ! type(SPARSE_MATRIX_T) :: sH
     ! integer               :: status, mkl_d_create_coo
@@ -168,10 +155,6 @@ subroutine form_sparse_H(finished)
     !                           n, n, nnz_tot,&
     !                           coo_r_all, coo_c_all, coo_v_all)
 
-    ! print *, "Status: ", status
-
-    ! Assumption: all diagonal entries are non-zero
-    ! make CSR arrays from COO arrays
     integer              :: nnz_csr, ii, scn_a, kk
     integer, allocatable :: coo_s(:), coo_n(:), csr_s(:), csr_c(:)
     double precision, allocatable :: csr_v(:)
@@ -185,11 +168,6 @@ subroutine form_sparse_H(finished)
 
     !$OMP SINGLE
     allocate(coo_s(n), coo_n(n), csr_s(n+1), csr_c(nnz_csr), csr_v(nnz_csr))
-    !$OMP END SINGLE
-
-    !$OMP BARRIER
-    !$OMP SINGLE
-    print *, "here"
     !$OMP END SINGLE
 
     ! calculate the starting index of each row in COO, since they were not sorted
@@ -221,11 +199,6 @@ subroutine form_sparse_H(finished)
     csr_s(1) = 1
     csr_s(n+1) = 1 
     !$OMP END SINGLE
-
-    !$OMP BARRIER
-    !$OMP SINGLE
-    print *, "here"
-    !$OMP END SINGLE
     
     !$OMP DO SCHEDULE(GUIDED) 
     do i = 2, n+1
@@ -237,11 +210,6 @@ subroutine form_sparse_H(finished)
     end do
     !$OMP END DO
 
-    !$OMP BARRIER
-    !$OMP SINGLE
-    print *, "here"
-    print *, csr_s
-    scn_a = 0
     !$OMP SIMD REDUCTION(inscan, +:scn_a)
     do i = 1, n+1
         scn_a = scn_a + csr_s(i)
@@ -249,33 +217,20 @@ subroutine form_sparse_H(finished)
         csr_s(i) = scn_a
     end do
     !$OMP END SINGLE
-
     
-    !$OMP BARRIER
-    !$OMP SINGLE
-    print *, "here"
-    print *, csr_s
-    !$OMP END SINGLE
-
     ! loop through rows and construct CSR matrix
-
-    !$OMP SINGLE
-    allocate(k_arr(n_threads))
-    k_arr = 0
-    !$OMP END SINGLE
 
     !$OMP DO SCHEDULE(GUIDED)
     do i = 1, n
-        k_arr(ID) = 0
-        print *, "ID ", ID, " has ", i
+        k = 0
         do j = 1, i-1 !TODO: possible to only loop over number of entries?
             ! get pre-diagonal entries
             ! search jth row for column i
             do ii = coo_s(j)+1, coo_s(j) + coo_n(j) -1
                 if (coo_c_all(ii) == i) then
-                    csr_v(csr_s(i) + k_arr(ID)) = coo_v_all(ii)
-                    csr_c(csr_s(i) + k_arr(ID)) = j !coo_c_all(ii)
-                    k_arr(ID) += 1
+                    csr_v(csr_s(i) + k) = coo_v_all(ii)
+                    csr_c(csr_s(i) + k) = j !coo_c_all(ii)
+                    k += 1
                     exit
                 end if
             end do
@@ -283,40 +238,62 @@ subroutine form_sparse_H(finished)
         end do
         
         do ii = coo_s(i), coo_s(i) + coo_n(i) - 1
-            csr_v(csr_s(i) + k_arr(ID)) = coo_v_all(ii)
-            csr_c(csr_s(i) + k_arr(ID)) = coo_c_all(ii)
-            k_arr(ID) += 1
+            csr_v(csr_s(i) + k) = coo_v_all(ii)
+            csr_c(csr_s(i) + k) = coo_c_all(ii)
+            k += 1
         end do
     end do
     !$OMP END DO
-
-    !$OMP BARRIER
-
-
     !$OMP END PARALLEL
-    print *, "-------------- Reference H"
-    do i = 1, n
-        do j = 1, n
-            print *, i, j, h_ref(i,j)
-        end do
-    end do
-    
-    print *, "-------------- COO representation"
-    do i = 1, nnz_tot
-        print *, coo_r_all(i), coo_c_all(i), coo_v_all(i)
-    end do
 
-    print *, "-------------- CSR representation"
-    do i = 1, nnz_csr
-        print *,  i, csr_c(i), csr_v(i)
-    end do
-    
-    print *, "----- CSR pointers"
-    do i = 1, n+1
-        print *, csr_s(i)
-    end do
 
     finished = .TRUE.
 end
 
-! subroutine sparse_mat_vec
+subroutine sparse_csr_dmv(A_v, A_c, A_p, x, y, sze, nnz)
+    implicit none
+    BEGIN_DOC
+    ! Compute the matrix vector product y = Ax with sparse A in CSR format
+    ! Not general. Assumes A is sze x sze; x, y are sze
+    END_DOC
+
+    integer,          intent(in)  :: sze, nnz, A_c(nnz), A_p(sze+1)
+    double precision, intent(in)  :: A_v(nnz), x(sze)
+    double precision, intent(out) :: y(sze)
+    intenger                      :: i, j
+
+    ! loop over rows
+    !$OMP PARALLEL DO PRIVATE(i, j, sze) SHARED(y, x, A_c, A_p, A_v)&
+    !$OMP SCHEDULE(GUIDED)
+    do i = 1, sze
+        ! loop over columns
+        do j = A_p(i), A_p(i+1)-1
+            y(i) = y(i) + A_v(j) * x(A_c(j))
+        end do
+    end do
+    !$OMP END PARALLEL DO
+end
+
+subroutine sparse_csr_zmv(A_v, A_c, A_p, x, y, sze, nnz)
+    implicit none
+    BEGIN_DOC
+    ! Compute the matrix vector product y = Ax with sparse A in CSR format
+    ! Not general. Assumes A is sze x sze; x, y are sze
+    END_DOC
+
+    integer,          intent(in)  :: sze, nnz, A_c(nnz), A_p(sze+1)
+    complex*16,       intent(in)  :: A_v(nnz), x(sze)
+    complex*16,       intent(out) :: y(sze)
+    intenger                      :: i, j
+
+    ! loop over rows
+    !$OMP PARALLEL DO PRIVATE(i, j, sze) SHARED(y, x, A_c, A_p, A_v)&
+    !$OMP SCHEDULE(GUIDED)
+    do i = 1, sze
+        ! loop over columns
+        do j = A_p(i), A_p(i+1)-1
+            y(i) = y(i) + A_v(j) * x(A_c(j))
+        end do
+    end do
+    !$OMP END PARALLEL DO
+end
