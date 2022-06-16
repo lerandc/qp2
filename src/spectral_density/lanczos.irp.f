@@ -116,7 +116,7 @@ subroutine lanczos_tridiag_reortho_c(H, u0, alpha, beta, k, sze)
 
 end
 
-subroutine lanczos_tridiag_sparse_reortho_c(H_v, H_c, H_p,, u0, alpha, beta, k, nnz, sze)
+subroutine lanczos_tridiag_sparse_reortho_c(H_v, H_c, H_p, u0, alpha, beta, k, nnz, sze)
     implicit none
     BEGIN_DOC
     ! Function that performs lanczos triadiaglonization of a hermitian matrix

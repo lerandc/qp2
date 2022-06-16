@@ -19,7 +19,8 @@ program spectral_density
         deallocate(psi_det_read)
     end if
 
-    call form_sparse_H(finished)
+    ! call form_sparse_H(finished)
+    call test_unique_looping(finished)
     print *, finished
     ! if (is_complex) then 
     !     allocate(psi_coef_complex_read(N_det, N_states))

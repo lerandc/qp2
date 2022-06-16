@@ -20,7 +20,7 @@ BEGIN_PROVIDER [complex*16, greens_A, (greens_omega_N)]
     implicit none
 
     double precision        :: alpha(lanczos_N), beta(lanczos_N), epsilon
-    double precision        :: psi_coef_excited(N_det, N_states), E0, nomr
+    double precision        :: psi_coef_excited(N_det, N_states), E0, norm
     integer(bit_kind)       :: det_copy(N_int,2,N_det)
     complex*16              :: z(greens_omega_N), zalpha(lanczos_N), bbeta(lanczos_N), cfraction_c
     integer                 :: i, i_ok
