@@ -5,7 +5,8 @@ program spectral_density
     END_DOC
 
     logical                         :: force_reads, finished
-    integer                         :: N_det_read
+    integer                         :: N_det_read, N_test, i, j, nnz, nnz_max
+    integer, allocatable            :: idx_arr(:)
     integer(bit_kind), allocatable  :: psi_det_read(:,:,:)
     double precision , allocatable  :: psi_coef_read(:,:)
     complex*16       , allocatable  :: psi_coef_complex_read(:,:)
@@ -19,9 +20,31 @@ program spectral_density
         deallocate(psi_det_read)
     end if
 
-    ! call form_sparse_H(finished)
-    call test_unique_looping(finished)
+    call form_sparse_dH(finished)
+    ! call test_unique_looping(finished)
     print *, finished
+
+    ! nnz_max = ceiling(sqrt(real(nnz_max_per_row)))
+
+    ! print *, nnz_max, nnz_max_per_row
+
+    ! allocate(idx_arr(nnz_max))
+    ! do i = 1, N_det
+    !     idx_arr = 0
+    !     call get_sparse_columns(i, idx_arr, nnz, nnz_max)
+    !     print *, '-------------------'
+    !     write(*, '(A12, I10, A12, I10)'), 'det idx:', idx_arr(1),&
+    !                                       'nnz:', nnz
+    !     do j = 1, nnz+1
+    !         write(*, '(I10, I10)'), j, idx_arr(j)
+    !     end do
+    ! end do
+    ! deallocate(idx_arr)
+
+    ! idx_arr = get_sparse_columns(5,1,elec_alpha_num+1)
+    ! do i = 1, size(idx_arr,1)
+    !     write(*,'(I10, I10)'), i , idx_arr(i)
+    ! end do
     ! if (is_complex) then 
     !     allocate(psi_coef_complex_read(N_det, N_states))
     !     call ezfio_get_determinants_psi_coef_complex(psi_coef_complex_read)

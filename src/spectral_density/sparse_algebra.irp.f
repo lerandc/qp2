@@ -1,48 +1,60 @@
-subroutine measure_sparsity(finished)
+! faster loop for getting nonzero entries in H matrix
+
+! use sorted determinants
+! form maps between unique alpha/beta to full determinant space
+! have it be CSR pointer style: ranges are separated by unique alpha
+! thus map is length N_unique_alpha_dets?
+! how to perform a look up for where beta fall?
+
+! get reference determinant from bilinear matrix indexing
+
+! check if it can accept homo/lumo hole/particle
+
+! if so
+! calculate diagonal component
+
+
+! generate list of dets A related by single alpha excitation
+! generate list of dets B related by single beta excitation
+! generate list of dets AA related by double alpha excitation
+! generate list of dets BB related by double beta excitation
+! from A, B, generate list of dets AB and BA related by double alpha/beta excitation
+
+! when generating list, only add dets that:
+! 1) are greater in index in sorting order
+! 2) can accept hole/particle
+
+! iterate over lists and calculate H_ij calculations for determinant pairs
+! using maps, populate COO sparse format at all coordinates where det pairs correspond to
+! populate in row -> column order (this should be implicit in the sorted ordering)
+
+BEGIN_PROVIDER [integer, nnz_max_per_row]
+&BEGIN_PROVIDER [integer, nnz_max_tot]
+
+    BEGIN_DOC
+    ! Total possible number of entries in each column/row in full determinant space
+    ! Vastly overestimates actual number needed
+    END_DOC
     implicit none
 
-    logical, intent(out) :: finished
-    integer              :: n, i, j, nnz, nnz_tot
-    integer, allocatable :: n_list(:), n_test(:)
-    double precision     :: hij
+    integer     :: s_a, s_b, d_a, d_b
 
-    allocate(n_list(2))
-    n_list = (/1000, 25000/)!, 50000, 100000, 250000, 500000, N_det/)
+    s_a = elec_alpha_num * (mo_num - elec_alpha_num)
+    s_b = elec_beta_num * (mo_num - elec_beta_num)
     
-    allocate(n_test(3))
-    n_test(:2) = n_list
-    n_test(3) = 1000
+    d_a = ( elec_alpha_num * (elec_alpha_num - 1) / 2) * &
+    ( (mo_num - elec_alpha_num) * (mo_num - elec_alpha_num - 1) / 2)
+    
+    d_b = ( elec_beta_num * (elec_beta_num - 1) / 2) * &
+    ( (mo_num - elec_beta_num) * (mo_num - elec_beta_num - 1) / 2)
+    
+    write(*, '(I10, I10, I10, I10, I10)'),&
+            elec_alpha_num, elec_beta_num, mo_num, s_a, s_b
 
-    call move_alloc(n_test, n_list)
+    nnz_max_per_row = 1 + s_a + s_b + s_a*s_b + d_a + d_b
+    nnz_max_tot = N_det * nnz_max_per_row
 
-    call i_H_j(psi_det(1,1,1), psi_det(1,1,1), N_int, hij) ! force provide early
-    do n = 1, size(n_list, 1)
-        
-        !$OMP PARALLEL PRIVATE(i,j,hij,nnz) SHARED(n, psi_det, n_list, nnz_tot) 
-        nnz_tot = 0
-        nnz = 0
-        !$OMP DO SCHEDULE(GUIDED)
-        do i = 1, n_list(n)
-            do j = i, n_list(n)
-                call i_H_j(psi_det(1,1,i), psi_det(1,1,j),N_int, hij)
-                if (abs(hij) > 0) then
-                    nnz += 1
-                end if
-            end do
-        end do
-        !$OMP END DO
-
-        !$OMP CRITICAL
-        nnz_tot = nnz_tot + nnz
-        !$OMP END CRITICAL
-        !$OMP END PARALLEL
-
-        print *, "N_det: ", n_list(n), "nnz: ", 2*nnz_tot, "frac: ", (nnz_tot*2.d0)/(n_list(n)**2.0)
-    end do
-
-    finished = .TRUE.
-end
-
+END_PROVIDER
 
 ! to convert to provider, provide all 4 array for intel MKL CSR representation
 subroutine form_sparse_dH(finished)
@@ -67,7 +79,7 @@ subroutine form_sparse_dH(finished)
     ! force provide early so that threads don't each try to provide
     call i_H_j(psi_det(1,1,1), psi_det(1,1,1), N_int, hij) 
     
-    !$OMP PARALLEL SHARED(n, nnz_tot, nnz_arr, n_threads) &
+    !$OMP PARALLEL SHARED(n, nnz_tot, nnz_arr, n_threads, psi_det, N_int) &
     !$OMP PRIVATE(i,j,k, hij, nnz, ID, coo_r, coo_c, coo_v, coo_r_t, coo_c_t, coo_v_t) 
     !$ n_threads = OMP_get_num_threads()
     !$ ID = OMP_get_thread_num() + 1
@@ -126,7 +138,6 @@ subroutine form_sparse_dH(finished)
     !$OMP CRITICAl
     nnz_tot = nnz_tot + nnz
     !$OMP END CRITICAl
-
     !$OMP BARRIER
 
     !$OMP SINGLE
@@ -189,7 +200,6 @@ subroutine form_sparse_dH(finished)
     end do
     !$OMP END DO
 
-    
     ! calculate CSR pointer ranges
     ! row i data goes from csr_s(i) to csr_s(i+1) - 1
     ! first, count all entries in parallel, then perform scan to set pointer ranges
@@ -210,7 +220,10 @@ subroutine form_sparse_dH(finished)
     end do
     !$OMP END DO
 
+    ! need to strongly enforce synchronization here
+    !$OMP BARRIER
     !$OMP SINGLE
+    scn_a = 0
     !$OMP SIMD REDUCTION(inscan, +:scn_a)
     do i = 1, n+1
         scn_a = scn_a + csr_s(i)
@@ -218,9 +231,10 @@ subroutine form_sparse_dH(finished)
         csr_s(i) = scn_a
     end do
     !$OMP END SINGLE
+    !$OMP BARRIER
     
-    ! loop through rows and construct CSR matrix
 
+    ! loop through rows and construct CSR matrix
     !$OMP DO SCHEDULE(GUIDED)
     do i = 1, n
         k = 0
@@ -246,6 +260,11 @@ subroutine form_sparse_dH(finished)
     end do
     !$OMP END DO
     !$OMP END PARALLEL
+
+    print *, 'CSR representation'
+    print *, csr_v
+    print *, csr_c
+    print *, csr_s
 
 
     finished = .TRUE.
@@ -300,7 +319,7 @@ subroutine sparse_csr_zmv(A_v, A_c, A_p, x, y, sze, nnz)
 end
 
 
-subroutine test_unique_looping(finished)
+subroutine get_sparse_columns(k_a, columns, nnz, nnz_max)
     ! needs to be a function, not a subroutine, if output size is unknown
 
     ! this whole function should be within a parallel loop over N_det
@@ -309,422 +328,224 @@ subroutine test_unique_looping(finished)
     ! for the hamiltonian in the space of the set of determinants
     implicit none
 
-    logical :: finished
-    integer :: i, j, k, k_a, k_b, l_a, l_b, maxab
+    integer, intent(in)      :: k_a, nnz_max
+    integer, intent(out)     :: nnz, columns(nnz_max)
+    integer :: i, j, k, k_b
     integer :: krow, kcol, lrow, lcol
-    integer(bit_kind) :: tmp_det(N_int, 2), tmp_det2(N_int, 2), tmp_det3(N_int, 2), sdet_a(N_int), sdet_b(N_int)
-    ! only need two tmp dets, change first to ref_det
+    integer :: lidx, kidx, tidx, n_buffer
+    integer :: n_singles_a, n_singles_b, n_doubles_aa, n_doubles_bb, n_doubles_ab
+    integer :: n_buffer_old, n_doubles_ab_tot, n_doubles_ab_max, n_off_diagonal, n_offset
 
-    ! print *, k_a, krow, kcol
+    integer(bit_kind) :: ref_det(N_int, 2), tmp_det(N_int, 2), tmp_det2(N_int, 2), sdet_a(N_int), sdet_b(N_int)
+    integer(bit_kind), allocatable    :: buffer(:,:)
+    integer, allocatable              :: singles_a(:), singles_b(:), doubles_aa(:), doubles_bb(:), doubles_ab(:)
+    integer, allocatable              :: idx(:), all_idx(:), srt_idx(:)
+    
+    allocate(buffer(N_int, N_det), idx(N_det))
 
+    n_singles_a = 0
+    n_singles_b = 0
+    n_doubles_aa = 0
+    n_doubles_ab = 0
+    n_doubles_bb = 0
+    
+    kidx = psi_bilinear_matrix_order(k_a)
+    krow = psi_bilinear_matrix_rows(k_a)
+    kcol = psi_bilinear_matrix_columns(k_a)
+    ref_det(:,1) = psi_det_alpha_unique(:, krow)
+    ref_det(:,2) = psi_det_beta_unique (:, kcol)
+    
+    ! check if determinant can accept electron
+    ! iorb = elec_alpha_num + 1
+    ! ispin = 1
+    ! call orb_is_filled(tmp_det, iorb, ispin, N_int, filled)
+
+    ! Finding (1,0) and (2,0) excitations
+    ! loop over same beta different alpha
+    n_buffer = 0
+    do i = psi_bilinear_matrix_columns_loc(kcol), psi_bilinear_matrix_columns_loc(kcol+1)-1
+        lidx = psi_bilinear_matrix_order(i)
+
+        if (lidx <= kidx) cycle
+
+        lcol = psi_bilinear_matrix_columns(i)
+        lrow = psi_bilinear_matrix_rows(i)
+
+        tmp_det(:,1) = psi_det_alpha_unique(:, lrow)
+        tmp_det(:,2) = psi_det_beta_unique (:, lcol)
+
+        ! call orb_is_filled(tmp_det, iorb, ispin, N_int, filled)
+        
+        ! if (filled) cycle
+
+        ! add determinant to buffer
+        ! buffer is list of alpha spin determinants
+        n_buffer += 1
+        buffer(:,n_buffer) = tmp_det(:,1)
+        idx(n_buffer) = lidx
+    end do
+
+    allocate(singles_a(n_buffer), doubles_aa(n_buffer))
+    sdet_a = ref_det(:,1)
+    call get_all_spin_singles_and_doubles(buffer, idx, sdet_a, &
+                        N_int, n_buffer, singles_a, doubles_aa, n_singles_a, n_doubles_aa)
+
+
+    deallocate(buffer, idx)
+    allocate(buffer(N_int, N_det), idx(N_det))
+
+
+    ! Finding (0,1) and (0,2) excitations 
+    k_b = psi_bilinear_matrix_order_transp_reverse(k_a)
+    krow = psi_bilinear_matrix_transp_rows(k_b) !this is unnecessary, technically
+    kcol = psi_bilinear_matrix_transp_columns(k_b)
+    
+    ! check if determinant can accept electron
+    ! iorb = elec_alpha_num + 1
+    ! ispin = 1
+    ! call orb_is_filled(tmp_det, iorb, ispin, N_int, filled)
     ! call print_det(tmp_det, N_int)
 
-    ! do i = 1, 20
-    !     tmp_det(1:N_int, :) = psi_det_sorted_bit(:,:,i)
-    !     print *, tmp_det(:,1), tmp_det(:,2)
-    ! end do
+    ! loop over same alpha different beta
+    n_buffer = 0
+    do i = psi_bilinear_matrix_transp_rows_loc(krow), psi_bilinear_matrix_transp_rows_loc(krow+1)-1
+        tidx = psi_bilinear_matrix_order_transp_reverse(i)
+        lidx = psi_bilinear_matrix_order(tidx)
 
-    ! print *, "----------------------"
+        if (lidx <= kidx) cycle
 
-    ! do i = 1, 20
-    !     sdet_a = psi_det_alpha_unique(:,i)
-    !     sdet_b = psi_det_beta_unique(:,i)
-    !     print *, sdet_a, sdet_b
-    ! end do
+        lcol = psi_bilinear_matrix_transp_columns(i)
+        lrow = psi_bilinear_matrix_transp_rows(i)
+        
+        tmp_det(:,1) = psi_det_alpha_unique(:, lrow)
+        tmp_det(:,2) = psi_det_beta_unique (:, lcol)
+        
+        ! call orb_is_filled(tmp_det, iorb, ispin, N_int, filled)
+        
+        ! if (filled) cycle
 
-    ! print *, "----------------------"
+        ! add determinant to buffer
+        ! buffer is list of beta spin determinants
 
-    ! do i = 1, 20
-    !     print *, psi_bilinear_matrix_rows(i), psi_bilinear_matrix_columns(i), psi_bilinear_matrix_order_reverse(i), psi_bilinear_matrix_order(i)
-    ! end do
-
-    ! print *, "----------------------"
-    ! do i = 1, 20
-    !     krow = psi_bilinear_matrix_rows(i)
-    !     kcol = psi_bilinear_matrix_columns(i)
-    !     tmp_det(:,1) = psi_det_alpha_unique(1:N_int, krow)
-    !     tmp_det(:,2) = psi_det_beta_unique (1:N_int, kcol)
-    !     tmp_det2 = psi_det(:, :, psi_bilinear_matrix_order(i))
-    !     print *, i, krow, kcol
-    !     print *, tmp_det(:,1), tmp_det2(:,1), tmp_det(:,2), tmp_det2(:,2)
-    ! end do
-
-    ! print *, "----------------------"
-
-    ! do i = 1, 20
-    !     print *, psi_bilinear_matrix_transp_rows(i), psi_bilinear_matrix_transp_columns(i), psi_bilinear_matrix_order_transp_reverse(i), psi_bilinear_matrix_transp_order(i)
-    ! end do
-
-    ! print *, "----------------------"
-    ! do i = 1, 20
-    !     k_b = psi_bilinear_matrix_order_transp_reverse(i)
-    !     krow = psi_bilinear_matrix_transp_rows(k_b)
-    !     kcol = psi_bilinear_matrix_transp_columns(k_b)
-    !     tmp_det(1:N_int,1) = psi_det_alpha_unique(1:N_int, krow)
-    !     tmp_det(1:N_int,2) = psi_det_beta_unique (1:N_int, kcol)
-    !     print *, i
-    !     call print_det(tmp_det, N_int)
-    !     ! tmp_det2 = psi_det(:, :, psi_bilinear_matrix_order(i))
-    !     ! write(*, '(I8, I8, I8)'), i, k_b, psi_bilinear_matrix_order_transp_reverse(k_b)
-    !     ! write(*, '(I12, I12, I12, I12)'), tmp_det(:,1), tmp_det2(:,1), tmp_det(:,2), tmp_det2(:,2)
-    ! end do
-
-    ! print *, "----------------------"
-    ! do i = 1, maxab
-    !     print *, psi_bilinear_matrix_columns_loc(i), psi_bilinear_matrix_transp_rows_loc(i)
-    ! end do
-
-    ! search in tranp (alpha major) for beta single/double excitations
-    ! only add dets to buffer if index in determinant space > index of reference determinant
+        n_buffer += 1
+        buffer(:,n_buffer) = tmp_det(:,2)
+        idx(n_buffer) = lidx
+    end do
     
-    integer :: lidx, kidx, tidx, ispin, iorb, n_buffer
-    integer :: n_singles_a, n_singles_b, n_doubles_aa, n_doubles_bb, n_doubles_ab
-    integer(bit_kind), allocatable  :: buffer(:,:)
-    integer,   allocatable          :: idx(:), singles_a(:), singles_b(:), doubles_aa(:), doubles_bb(:), doubles_ab(:)
-    logical :: filled
-    integer :: n_buffer_old, n_doubles_ab_tot, n_doubles_ab_max
-    integer, allocatable :: all_idx(:), srt_idx(:)
-    integer              :: n_off_diagonal, n_offset
+    allocate(singles_b(n_buffer), doubles_bb(n_buffer))
+    sdet_b = ref_det(:,2)
+    call get_all_spin_singles_and_doubles(buffer, idx, sdet_b, &
+                        N_int, n_buffer, singles_b, doubles_bb, n_singles_b, n_doubles_bb)
 
-    logical :: a, b, aa, bb, ab
 
+    ! Finding (1,1) excitations
+    deallocate(buffer, idx)
+    allocate(buffer(N_int, N_det), idx(N_det))
+
+    ! need to iterate over single excitations over a small set of determinants
+    ! and need to add new (1,1) determinants, but without transferring allocation
+    ! after each new set
+
+    ! create long term storage buffers that upper bound total ab excitations
+    n_doubles_ab_max = 0
+    do j = 1, n_singles_b
+        k = singles_b(j)
+        kcol = psi_bilinear_matrix_columns(k)
+        n_doubles_ab_max += psi_bilinear_matrix_columns_loc(kcol+1)&
+                        - psi_bilinear_matrix_columns_loc(kcol)
+    end do
+
+    n_doubles_ab_max -= n_singles_b ! these won't get included in buffers but are in pointer ranges
     
-    do k_a = 1, N_det
-        allocate(buffer(N_int, N_det), idx(N_det))
-        maxab = max(N_det_alpha_unique, N_det_beta_unique) + 1
+    ! n_doubles_ab_max will always be larger than the sum of n_buffer across all iterations
+    ! n_doubles_ab_tot will always be smaller than n_buffer 
+    ! in the end, only first n_doubles_ab_tot values should be needed
 
-        n_singles_a = 0
-        n_singles_b = 0
-        n_doubles_aa = 0
-        n_doubles_ab = 0
-        n_doubles_bb = 0
-        
-        
-        kidx = psi_bilinear_matrix_order(k_a)
+    allocate(doubles_ab(n_doubles_ab_max))
 
-        krow = psi_bilinear_matrix_rows(k_a)
-        kcol = psi_bilinear_matrix_columns(k_a)
-        tmp_det(1:N_int,1) = psi_det_alpha_unique(1:N_int, krow)
-        tmp_det(1:N_int,2) = psi_det_beta_unique (1:N_int, kcol)
-        
-        ! check if determinant can accept electron
-        iorb = elec_alpha_num + 1
-        ispin = 1
-        call orb_is_filled(tmp_det, iorb, ispin, N_int, filled)
-        ! print *, "kidx: ", kidx
-        ! print *, "Filled?", filled
-        ! call print_det(tmp_det, N_int)
+    n_buffer = 0
+    n_buffer_old = 0
+    n_doubles_ab_tot = 0
 
+    ! start from (0,1) to excite to (1,1)
+    do j = 1, n_singles_b
 
-        
-        ! print *, "--------- Finding (1,0) and (2,0) excitations ----------"
+        k = singles_b(j)
+        krow = psi_bilinear_matrix_rows(k)
+        kcol = psi_bilinear_matrix_columns(k)
+
+        tmp_det2(:,1) = psi_det_alpha_unique(:, krow)
+        tmp_det2(:,2) = psi_det_beta_unique (:, kcol)
+
         ! loop over same beta different alpha
-        n_buffer = 0
         do i = psi_bilinear_matrix_columns_loc(kcol), psi_bilinear_matrix_columns_loc(kcol+1)-1
             lidx = psi_bilinear_matrix_order(i)
 
-            ! print *, i - psi_bilinear_matrix_columns_loc(kcol)
-
-            if (lidx <= kidx) then
-                ! print *, i - psi_bilinear_matrix_columns_loc(kcol), "idx bound"
-                cycle ! only work on upper triangle
-            end if
+            if (lidx <= kidx) cycle
 
             lcol = psi_bilinear_matrix_columns(i)
             lrow = psi_bilinear_matrix_rows(i)
 
-            tmp_det2(1:N_int,1) = psi_det_alpha_unique(1:N_int, lrow)
-            tmp_det2(1:N_int,2) = psi_det_beta_unique (1:N_int, lcol)
+            tmp_det(:,1) = psi_det_alpha_unique(:, lrow)
+            tmp_det(:,2) = psi_det_beta_unique (:, lcol)
 
-            call orb_is_filled(tmp_det2, iorb, ispin, N_int, filled)
+            ! call orb_is_filled(tmp_det, iorb, ispin, N_int, filled)
             
-            if (filled) then
-                ! print *, i - psi_bilinear_matrix_columns_loc(kcol), "can't accept electron"
-                cycle ! new determinant cannot accept electron
-            end if
+            ! if (filled) cycle
 
             ! add determinant to buffer
             ! buffer is list of alpha spin determinants
             n_buffer += 1
-            ! call print_det(tmp_det2, N_int)
-            buffer(:,n_buffer) = tmp_det2(:,1)
-            idx(n_buffer) = lidx
-
-        end do
-
-        ! print *, "n_buffer", n_buffer
-        allocate(singles_a(n_buffer), doubles_aa(n_buffer))
-        sdet_a = tmp_det(:,1)
-        call get_all_spin_singles_and_doubles(buffer, idx, sdet_a, &
-                            N_int, n_buffer, singles_a, doubles_aa, n_singles_a, n_doubles_aa)
-
-        ! print *, n_singles_a, n_doubles_aa
-        ! print *, "---------------"
-        ! do i = 1, n_buffer
-        !     write(*, '(I10, I10, I10, I10)'), i, idx(i), singles_a(i), doubles_aa(i)
-        ! end do
-
-        deallocate(buffer, idx)
-
-        allocate(buffer(N_int, N_det), idx(N_det))
-
-
-        ! print *, "--------- Finding (0,1) and (0,2) excitations ----------"
-        k_b = psi_bilinear_matrix_order_transp_reverse(k_a)
-        krow = psi_bilinear_matrix_transp_rows(k_b)
-        kcol = psi_bilinear_matrix_transp_columns(k_b)
-        tmp_det(1:N_int,1) = psi_det_alpha_unique(1:N_int, krow)
-        tmp_det(1:N_int,2) = psi_det_beta_unique (1:N_int, kcol)
-        
-        ! check if determinant can accept electron
-        iorb = elec_alpha_num + 1
-        ispin = 1
-        call orb_is_filled(tmp_det, iorb, ispin, N_int, filled)
-        ! print *, "Filled?", filled
-        ! call print_det(tmp_det, N_int)
-
-        ! loop over same alpha different beta
-        n_buffer = 0
-        do i = psi_bilinear_matrix_transp_rows_loc(krow), psi_bilinear_matrix_transp_rows_loc(krow+1)-1
-            tidx = psi_bilinear_matrix_order_transp_reverse(i)
-            lidx = psi_bilinear_matrix_order(tidx)
-
-            ! print *, i - psi_bilinear_matrix_transp_rows_loc(krow)
-            
-            if (lidx <= kidx) then
-                ! print *, i - psi_bilinear_matrix_transp_rows_loc(krow), "idx bound"
-                cycle ! only work on upper triangle
-            end if
-            lcol = psi_bilinear_matrix_transp_columns(i)
-            lrow = psi_bilinear_matrix_transp_rows(i)
-            
-            tmp_det2(1:N_int,1) = psi_det_alpha_unique(1:N_int, lrow)
-            tmp_det2(1:N_int,2) = psi_det_beta_unique (1:N_int, lcol)
-            
-            call orb_is_filled(tmp_det2, iorb, ispin, N_int, filled)
-            
-            if (filled) then
-                ! print *, i - psi_bilinear_matrix_transp_rows_loc(krow), "can't accept electron"
-                cycle ! new determinant cannot accept electron
-            end if
-            ! add determinant to buffer
-            ! buffer is list of beta spin determinants
-            n_buffer += 1
-            ! call print_det(tmp_det2, N_int)
-            buffer(:,n_buffer) = tmp_det2(:,2)
+            buffer(:,n_buffer) = tmp_det(:,1)
             idx(n_buffer) = lidx
         end do
+
+        sdet_a = tmp_det2(:,1)
+        call get_all_spin_singles(buffer(:,n_buffer_old+1:n_buffer), idx(n_buffer_old+1:n_buffer),&
+                                sdet_a, N_int, n_buffer-n_buffer_old,&
+                                doubles_ab(n_doubles_ab_tot+1:n_doubles_ab_tot+n_buffer-n_buffer_old),&
+                                n_doubles_ab)
+
+
+        n_buffer_old = n_buffer
+        n_doubles_ab_tot += n_doubles_ab
         
-        ! print *, "n_buffer", n_buffer
-        allocate(singles_b(n_buffer), doubles_bb(n_buffer))
-        sdet_b = tmp_det(:,2)
-        call get_all_spin_singles_and_doubles(buffer, idx, sdet_b, &
-                            N_int, n_buffer, singles_b, doubles_bb, n_singles_b, n_doubles_bb)
-
-        ! print *, n_singles_b, n_doubles_bb
-        ! print *, "---------------"
-        ! do i = 1, n_buffer
-        !     write(*, '(I10, I10, I10, I10)'), i, idx(i), singles_b(i), doubles_bb(i)
-        ! end do
-
-        ! by now, have acquired (0,1), (0,2), (1,0), (2,0) excitations
-        ! need just (1,1)
-        ! can loop either over single a or single b to get doubles ab
-        ! do I need another index or do I have enough info already?
-
-        ! print *, "--------- Finding (1,1) excitations ----------"
-        deallocate(buffer, idx)
-        allocate(buffer(N_int, N_det), idx(N_det))
-
-
-
-        ! need to iterate over single excitations over a small set of determinants
-        ! and need to add new (1,1) determinants, but without transferring allocation
-        ! after each new set
-
-        ! create long term storage buffers that upper bound total ab excitations
-        n_doubles_ab_max = 0
-        do j = 1, n_singles_b
-            k = singles_b(j)
-            kcol = psi_bilinear_matrix_columns(k)
-            n_doubles_ab_max += psi_bilinear_matrix_columns_loc(kcol+1)&
-                            - psi_bilinear_matrix_columns_loc(kcol)
-        end do
-
-        n_doubles_ab_max -= n_singles_b ! these won't get included in buffers but are in pointer ranges
-        
-        ! n_doublse_ab_max will always be larger than the sum of n_buffer across all iterations
-        ! n_doubles_ab_tot will always be smaller than n_buffer 
-        ! in the end, only first n_doubles_ab_tot values should be needed
-
-        allocate(doubles_ab(n_doubles_ab_max))
-
-        n_buffer = 0
-        n_buffer_old = 0
-        n_doubles_ab_tot = 0
-        do j = 1, n_singles_b
-
-            k = singles_b(j)
-            krow = psi_bilinear_matrix_rows(k)
-            kcol = psi_bilinear_matrix_columns(k)
-
-            tmp_det3(1:N_int,1) = psi_det_alpha_unique(1:N_int, krow)
-            tmp_det3(1:N_int,2) = psi_det_beta_unique (1:N_int, kcol)
-
-            ! print *, "--- Local ref det"
-
-            ! call print_det(tmp_det3, N_int)
-            ! loop over same beta different alpha
-            do i = psi_bilinear_matrix_columns_loc(kcol), psi_bilinear_matrix_columns_loc(kcol+1)-1
-                lidx = psi_bilinear_matrix_order(i)
-
-                ! print *, i - psi_bilinear_matrix_columns_loc(kcol)
-
-                if (lidx <= kidx) then
-                    ! print *, i - psi_bilinear_matrix_columns_loc(kcol), "idx bound"
-                    cycle ! only work on upper triangle
-                end if
-
-                lcol = psi_bilinear_matrix_columns(i)
-                lrow = psi_bilinear_matrix_rows(i)
-
-                tmp_det2(1:N_int,1) = psi_det_alpha_unique(1:N_int, lrow)
-                tmp_det2(1:N_int,2) = psi_det_beta_unique (1:N_int, lcol)
-
-                call orb_is_filled(tmp_det2, iorb, ispin, N_int, filled)
-                
-                if (filled) then
-                    ! print *, i - psi_bilinear_matrix_columns_loc(kcol), "can't accept electron"
-                    cycle ! new determinant cannot accept electron
-                end if
-
-                ! add determinant to buffer
-                ! buffer is list of alpha spin determinants
-                n_buffer += 1
-                ! call print_det(tmp_det2, N_int)
-                buffer(:,n_buffer) = tmp_det2(:,1)
-                idx(n_buffer) = lidx
-            end do
-
-            
-            ! print *, "n_buffer", n_buffer
-            sdet_a = tmp_det3(:,1)
-            call get_all_spin_singles(buffer(:,n_buffer_old+1:n_buffer), idx(n_buffer_old+1:n_buffer),&
-                                    sdet_a, N_int, n_buffer-n_buffer_old,&
-                                    doubles_ab(n_doubles_ab_tot+1:n_doubles_ab_tot+n_buffer-n_buffer_old),&
-                                    n_doubles_ab)
-
-
-            n_buffer_old = n_buffer
-            n_doubles_ab_tot += n_doubles_ab
-            
-
-        end do
-
-        ! print *, n_doubles_ab_tot
-        ! print *, "---------------"
-        ! do i = 1, n_buffer
-        !     write(*, '(I10, I10, I10, I10)'), i, idx(i), doubles_ab(i)
-        ! end do
-
-        ! now, need to just add all indices into list; sort; remove duplicates
-        ! though if number of duplicates is small, then might be better to just
-        ! check in calculation loop to see if previous j equal current j and cycle
-
-
-
-        ! number of off-diagonal terms needed to caclulate to fill this row in sparse Hamlitonian
-        n_off_diagonal = n_singles_a + n_singles_b + n_doubles_aa + n_doubles_ab + n_doubles_bb
-
-        allocate(all_idx(n_off_diagonal), srt_idx(n_off_diagonal))
-
-        do i = 1, n_off_diagonal
-            srt_idx(i) = i
-        end do
-
-        n_offset = 0
-        all_idx(n_offset+1:n_singles_a)             = singles_a(:n_singles_a)
-                                n_offset           += n_singles_a
-        all_idx(n_offset+1:n_offset+n_singles_b)    = singles_b(:n_singles_b)
-                                n_offset           += n_singles_b
-        all_idx(n_offset+1:n_offset+n_doubles_aa)   = doubles_aa(:n_doubles_aa)
-                                n_offset           += n_doubles_aa
-        all_idx(n_offset+1:n_offset+n_doubles_ab)   = doubles_ab(:n_doubles_ab)
-                                n_offset           += n_doubles_ab
-        all_idx(n_offset+1:n_offset+n_doubles_bb)   = doubles_bb(:n_doubles_bb)
-                                n_offset           += n_doubles_bb
-
-        a = n_singles_a > 0
-        b = n_singles_b > 0
-        aa = n_doubles_aa > 0
-        bb = n_doubles_bb > 0
-        ab = n_doubles_ab > 0
-
-        print *, "-----------------------------"
-        write(*, "(A14, I12, I12, L4, L2, L2, L2, L2)"), "Orig det idx: ", kidx, k_a, a,b,aa,ab,bb
-        call insertion_isort(all_idx, srt_idx, n_off_diagonal)
-        do i = 1, n_off_diagonal
-            write(*, '(I14, I12, I12)'), i, all_idx(i), srt_idx(i)
-        end do
-
-        deallocate(buffer, idx, singles_a, doubles_aa,&
-                   singles_b, doubles_bb, doubles_ab,&
-                   all_idx, srt_idx)
     end do
 
-    finished = .TRUE.
+    ! add all indices into list and sort
+    ! number of off-diagonal terms needed to caclulate to fill this row in sparse Hamlitonian
+    n_off_diagonal = n_singles_a + n_singles_b + n_doubles_aa + n_doubles_ab + n_doubles_bb
+
+    allocate(all_idx(n_off_diagonal+1), srt_idx(n_off_diagonal+1))
+
+    do i = 1, n_off_diagonal+1
+        srt_idx(i) = i
+    end do
+
+    n_offset = 0
+    all_idx(n_offset+1:n_offset+1)              = kidx
+                            n_offset           += 1
+    all_idx(n_offset+1:n_offset+n_singles_a)    = singles_a(:n_singles_a)
+                            n_offset           += n_singles_a
+    all_idx(n_offset+1:n_offset+n_singles_b)    = singles_b(:n_singles_b)
+                            n_offset           += n_singles_b
+    all_idx(n_offset+1:n_offset+n_doubles_aa)   = doubles_aa(:n_doubles_aa)
+                            n_offset           += n_doubles_aa
+    all_idx(n_offset+1:n_offset+n_doubles_ab)   = doubles_ab(:n_doubles_ab)
+                            n_offset           += n_doubles_ab
+    all_idx(n_offset+1:n_offset+n_doubles_bb)   = doubles_bb(:n_doubles_bb)
+                            n_offset           += n_doubles_bb
+
+    call insertion_isort(all_idx, srt_idx, n_off_diagonal)
+
+    deallocate(buffer, idx, singles_a, doubles_aa,&
+                singles_b, doubles_bb, doubles_ab,&
+                srt_idx)
+
+    columns = all_idx
+    nnz = n_off_diagonal
+
 end
-
-subroutine test_allocation(in_arr, N)
-    implicit none
-
-    integer, intent(in)  :: N
-    integer, allocatable, intent(inout) :: in_arr(:)
-    integer, allocatable :: tmp(:)
-
-    in_arr = N-3
-    allocate(tmp(N))
-
-    tmp(:size(in_arr)) = in_arr
-    tmp(size(in_arr)+1:N) = N
-    print *, tmp
-
-    call move_alloc(tmp, in_arr)
-end
-
-! KEEP IN MIND: how to sort by j? is that necessary or worth it? probably better locality in sparse MV to have it ordered in columns
-! might need to manually sort it
-
-! faster loop for getting nonzero entries in H matrix
-
-! use sorted determinants
-! form maps between unique alpha/beta to full determinant space
-! have it be CSR pointer style: ranges are separated by unique alpha
-! thus map is length N_unique_alpha_dets?
-! how to perform a look up for where beta fall?
-
-! get reference determinant from bilinear matrix indexing
-
-! check if it can accept homo/lumo hole/particle
-
-! if so
-! calculate diagonal component
-
-
-! generate list of dets A related by single alpha excitation
-! generate list of dets B related by single beta excitation
-! generate list of dets AA related by double alpha excitation
-! generate list of dets BB related by double beta excitation
-! from A, B, generate list of dets AB and BA related by double alpha/beta excitation
-
-! when generating list, only add dets that:
-! 1) are greater in index in sorting order
-! 2) can accept hole/particle
-
-! iterate over lists and calculate H_ij calculations for determinant pairs
-! using maps, populate COO sparse format at all coordinates where det pairs correspond to
-! populate in row -> column order (this should be implicit in the sorted ordering)
-
 
 ! Utils
 subroutine orb_is_filled(key_ref,iorb,ispin,Nint,is_filled)
