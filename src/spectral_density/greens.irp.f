@@ -20,37 +20,54 @@ BEGIN_PROVIDER [complex*16, greens_A, (greens_omega_N)]
     implicit none
 
     double precision        :: alpha(lanczos_N), beta(lanczos_N), epsilon
-    double precision        :: psi_coef_excited(N_det, N_states), E0, norm
+    double precision        :: psi_coef_excited(N_det, N_states), E0, norm, dnrm2
     integer(bit_kind)       :: det_copy(N_int,2,N_det)
     complex*16              :: z(greens_omega_N), zalpha(lanczos_N), bbeta(lanczos_N), cfraction_c
-    integer                 :: i, i_ok
+    integer                 :: i, nnz
+    integer, allocatable    :: H_c(:), H_p(:), t_H_c(:)
+    double precision , allocatable  ::  H_v(:), t_H_v(:)
 
+
+    ! prepare sparse Hamiltonian arrays
+    allocate(H_c(nnz_max_per_row), H_v(nnz_max_per_row), H_p(N_det+1))
+    call form_sparse_dH(H_p, H_c, H_v, nnz_max_per_row)
+
+    nnz = H_p(N_det+1)-1
+
+    allocate(t_H_c(nnz), t_H_v(nnz))
+    t_H_c = H_c(:nnz)
+    t_H_v = H_v(:nnz)
+
+    call move_alloc(t_H_c, H_c)
+    call move_alloc(t_H_v, H_v)
+
+    ! prepare input vector
+    ! add electron to LUMO
     call build_A_wavefunction(elec_alpha_num+1,1,psi_coef_excited,det_copy)
 
-    norm = sum(abs(psi_coef_excited)**2.0)
+    norm = dnrm2(N_det, psi_coef_excited(:,1), 1)
     psi_coef_excited = psi_coef_excited / norm
 
-    call lanczos_tridiag_reortho_r(h_matrix_all_dets, psi_coef_excited,&
+    call lanczos_tridiag_sparse_reortho_r(H_v, H_c, H_p, psi_coef_excited(:,1),&
                                    alpha, beta,&
-                                   lanczos_N, N_det)
+                                   lanczos_N, nnz, N_det)
 
     bbeta(1) = (1.0, 0.0)
     do i = 2, lanczos_N
         bbeta(i) = beta(i)**2.0
     end do
 
-    
     epsilon = 0.01 ! small, a limit is taken here
     E0 = psi_energy(1)
     z = E0 + (greens_omega + (0.0, 1.0)*epsilon)
     
-    ! this could be embarrisingly split across processes
-    ! TODO: refresh on OMP directives
+    !$OMP PARALLEL DO PRIVATE(i, zalpha) SHARED(alpha, bbeta, lanczos_N, greens_A_sparse)&
+    !$OMP SCHEDULE(GUIDED)
     do i = 1, greens_omega_N
         zalpha = z(i) - alpha
-        greens_A(i) = cfraction_c((0.0, 0.0), bbeta, zalpha, lanczos_N)
+        greens_A_sparse(i) = cfraction_c((0.0, 0.0), bbeta, zalpha, lanczos_N)
     end do
-
+    !$OMP END PARALLEL DO
 
 END_PROVIDER
 
@@ -58,20 +75,36 @@ BEGIN_PROVIDER [complex*16, greens_R, (greens_omega_N)]
     implicit none
 
     double precision        :: alpha(lanczos_N), beta(lanczos_N), epsilon
-    double precision        :: psi_coef_excited(N_det, N_states), E0, norm
+    double precision        :: psi_coef_excited(N_det, N_states), E0, norm, dnrm2
     integer(bit_kind)       :: det_copy(N_int,2,N_det)
     complex*16              :: z(greens_omega_N), zalpha(lanczos_N), bbeta(lanczos_N), cfraction_c
-    integer                 :: i
+    integer                 :: i, nnz
+    integer, allocatable    :: H_c(:), H_p(:), t_H_c(:)
+    double precision , allocatable  ::  H_v(:), t_H_v(:)
 
+    ! prepare sparse Hamiltonian arrays
+    allocate(H_c(nnz_max_per_row), H_v(nnz_max_per_row), H_p(N_det+1))
+    call form_sparse_dH(H_p, H_c, H_v, nnz_max_per_row)
+
+    nnz = H_p(N_det+1)-1
+
+    allocate(t_H_c(nnz), t_H_v(nnz))
+    t_H_c = H_c(:nnz)
+    t_H_v = H_v(:nnz)
+
+    call move_alloc(t_H_c, H_c)
+    call move_alloc(t_H_v, H_v)
+
+    ! prepare input vector
+    ! remove electron from HOMO
     call build_R_wavefunction(elec_alpha_num,1,psi_coef_excited,det_copy)
 
     norm = sum(abs(psi_coef_excited)**2.0)
     psi_coef_excited = psi_coef_excited / norm
 
-    call lanczos_tridiag_reortho_r(h_matrix_all_dets, psi_coef_excited,&
+    call lanczos_tridiag_sparse_reortho_r(H_v, H_c, H_p, psi_coef_excited(:,1),&
                                    alpha, beta,&
-                                   lanczos_N, N_det)
-
+                                   lanczos_N, nnz, N_det)
     bbeta(1) = (1.0, 0.0)
     do i = 2, lanczos_N
         bbeta(i) = beta(i)**2.0
@@ -81,12 +114,13 @@ BEGIN_PROVIDER [complex*16, greens_R, (greens_omega_N)]
     E0 = psi_energy(1)
     z = E0 - (greens_omega + (0.0, 1.0)*epsilon)
 
-    ! this could be embarrisingly split across processes
-    ! TODO: refresh on OMP directives
+    !$OMP PARALLEL DO PRIVATE(i, zalpha) SHARED(alpha, bbeta, lanczos_N, greens_A_sparse)&
+    !$OMP SCHEDULE(GUIDED)
     do i = 1, greens_omega_N
         zalpha = z(i) - alpha
         greens_R(i) = -1.0*cfraction_c((0.0, 0.0), bbeta, zalpha, lanczos_N)
     end do
+    !$OMP END PARALLEL DO
 
 END_PROVIDER
 
@@ -99,7 +133,7 @@ END_PROVIDER
 BEGIN_PROVIDER [complex*16, greens_A_complex, (greens_omega_N)]
     implicit none
 
-    double precision        :: alpha(lanczos_N), beta(lanczos_N), epsilon, E0, norm
+    double precision        :: alpha(lanczos_N), beta(lanczos_N), epsilon, E0, norm, dznrm2
     complex*16              :: psi_coef_excited(N_det, N_states) 
     integer(bit_kind)       :: det_copy(N_int,2,N_det)
     complex*16              :: z(greens_omega_N), zalpha(lanczos_N), bbeta(lanczos_N), cfraction_c

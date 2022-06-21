@@ -21,40 +21,49 @@ program spectral_density
         deallocate(psi_det_read)
     end if
 
-    allocate(csr_c(nnz_max_per_row), csr_v(nnz_max_per_row), csr_s(N_det+1))
-    call form_sparse_dH(csr_s, csr_c, csr_v, nnz_max_per_row)
+    ! allocate(csr_c(nnz_max_per_row), csr_v(nnz_max_per_row), csr_s(N_det+1))
+    ! call form_sparse_dH(csr_s, csr_c, csr_v, nnz_max_per_row)
 
-    nnz = csr_s(N_det+1)-1
+    ! nnz = csr_s(N_det+1)-1
 
-    ! shift allocation
-    allocate(t_csr_c(nnz), t_csr_v(nnz))
+    ! ! shift allocation
+    ! allocate(t_csr_c(nnz), t_csr_v(nnz))
 
-    t_csr_c = csr_c(:nnz)
-    t_csr_v = csr_v(:nnz)
+    ! t_csr_c = csr_c(:nnz)
+    ! t_csr_v = csr_v(:nnz)
 
-    call move_alloc(t_csr_c, csr_c)
-    call move_alloc(t_csr_v, csr_v)
+    ! call move_alloc(t_csr_c, csr_c)
+    ! call move_alloc(t_csr_v, csr_v)
 
-    print *, "Sparse arrays formed."
+    ! print *, "Sparse arrays formed."
 
-    ! test matrix multiply
-    u = 1.0 / sqrt(real(N_det))
-    v = 0.0
-    z = 0.0
+    ! ! test matrix multiply
+    ! u = 1.0 / sqrt(real(N_det))
+    ! v = 0.0
+    ! z = 0.0
 
-    call dsymv('U', N_det, 1.d0, h_matrix_all_dets, N_det, u, 1, 0.d0, z, 1)
+    ! call dsymv('U', N_det, 1.d0, h_matrix_all_dets, N_det, u, 1, 0.d0, z, 1)
 
-    call sparse_csr_dmv(csr_v, csr_c, csr_s, u, v, N_det, nnz)
+    ! call sparse_csr_dmv(csr_v, csr_c, csr_s, u, v, N_det, nnz)
+
+    ! err = 0.0
+    ! do i = 1, N_det
+    !     err +=  abs(z(i)-v(i))
+    !     write(*, '(I10, E14.6, E14.6, E14.6)'), i, z(i), v(i), abs(z(i)-v(i))
+    ! end do
+
+    ! write(*, '(A12, E14.6)'), "mae: ", err/N_det
+
+    ! deallocate(csr_c, csr_s, csr_v)
 
     err = 0.0
-    do i = 1, N_det
-        err +=  abs(z(i)-v(i))
-        write(*, '(I10, E14.6, E14.6, E14.6)'), i, z(i), v(i), abs(z(i)-v(i))
+    do i = 1, greens_omega_N
+        err += abs(greens_A(i)-greens_A_sparse(i))
+        ! print*, i, greens_A(i), greens_A_sparse(i), abs(greens_A(i)-greens_A_sparse(i))
     end do
 
-    write(*, '(A12, E14.6)'), "mae: ", err/N_det
+    write(*, '(A12, E14.6)'), "mae: ", err/greens_omega_N
 
-    deallocate(csr_c, csr_s, csr_v)
     ! if (is_complex) then 
     !     allocate(psi_coef_complex_read(N_det, N_states))
     !     call ezfio_get_determinants_psi_coef_complex(psi_coef_complex_read)

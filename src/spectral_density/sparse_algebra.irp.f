@@ -48,9 +48,6 @@ BEGIN_PROVIDER [integer, nnz_max_per_row]
     d_b = ( elec_beta_num * (elec_beta_num - 1) / 2) * &
     ( (mo_num - elec_beta_num) * (mo_num - elec_beta_num - 1) / 2)
     
-    write(*, '(I10, I10, I10, I10, I10)'),&
-            elec_alpha_num, elec_beta_num, mo_num, s_a, s_b
-
     nnz_max_per_row = 1 + s_a + s_b + s_a*s_b + d_a + d_b
     nnz_max_tot = N_det * nnz_max_per_row
 
