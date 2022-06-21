@@ -6,10 +6,11 @@ program spectral_density
 
     logical                         :: force_reads, finished
     integer                         :: N_det_read, N_test, i, j, nnz, nnz_max
-    integer, allocatable            :: idx_arr(:)
+    integer, allocatable            :: idx_arr(:), csr_c(:), csr_s(:), t_csr_c(:)
     integer(bit_kind), allocatable  :: psi_det_read(:,:,:)
-    double precision , allocatable  :: psi_coef_read(:,:)
+    double precision , allocatable  :: psi_coef_read(:,:), csr_v(:), t_csr_v(:)
     complex*16       , allocatable  :: psi_coef_complex_read(:,:)
+    double precision                :: hij,u(N_det),v(N_det), z(N_det), H(N_det, N_det), err
 
     call ezfio_get_determinants_n_det(N_det_read)
     N_det = N_det_read
@@ -20,31 +21,40 @@ program spectral_density
         deallocate(psi_det_read)
     end if
 
-    call form_sparse_dH(finished)
-    ! call test_unique_looping(finished)
-    print *, finished
+    allocate(csr_c(nnz_max_per_row), csr_v(nnz_max_per_row), csr_s(N_det+1))
+    call form_sparse_dH(csr_s, csr_c, csr_v, nnz_max_per_row)
 
-    ! nnz_max = ceiling(sqrt(real(nnz_max_per_row)))
+    nnz = csr_s(N_det+1)-1
 
-    ! print *, nnz_max, nnz_max_per_row
+    ! shift allocation
+    allocate(t_csr_c(nnz), t_csr_v(nnz))
 
-    ! allocate(idx_arr(nnz_max))
-    ! do i = 1, N_det
-    !     idx_arr = 0
-    !     call get_sparse_columns(i, idx_arr, nnz, nnz_max)
-    !     print *, '-------------------'
-    !     write(*, '(A12, I10, A12, I10)'), 'det idx:', idx_arr(1),&
-    !                                       'nnz:', nnz
-    !     do j = 1, nnz+1
-    !         write(*, '(I10, I10)'), j, idx_arr(j)
-    !     end do
-    ! end do
-    ! deallocate(idx_arr)
+    t_csr_c = csr_c(:nnz)
+    t_csr_v = csr_v(:nnz)
 
-    ! idx_arr = get_sparse_columns(5,1,elec_alpha_num+1)
-    ! do i = 1, size(idx_arr,1)
-    !     write(*,'(I10, I10)'), i , idx_arr(i)
-    ! end do
+    call move_alloc(t_csr_c, csr_c)
+    call move_alloc(t_csr_v, csr_v)
+
+    print *, "Sparse arrays formed."
+
+    ! test matrix multiply
+    u = 1.0 / sqrt(real(N_det))
+    v = 0.0
+    z = 0.0
+
+    call dsymv('U', N_det, 1.d0, h_matrix_all_dets, N_det, u, 1, 0.d0, z, 1)
+
+    call sparse_csr_dmv(csr_v, csr_c, csr_s, u, v, N_det, nnz)
+
+    err = 0.0
+    do i = 1, N_det
+        err +=  abs(z(i)-v(i))
+        write(*, '(I10, E14.6, E14.6, E14.6)'), i, z(i), v(i), abs(z(i)-v(i))
+    end do
+
+    write(*, '(A12, E14.6)'), "mae: ", err/N_det
+
+    deallocate(csr_c, csr_s, csr_v)
     ! if (is_complex) then 
     !     allocate(psi_coef_complex_read(N_det, N_states))
     !     call ezfio_get_determinants_psi_coef_complex(psi_coef_complex_read)

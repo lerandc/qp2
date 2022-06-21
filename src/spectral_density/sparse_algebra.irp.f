@@ -56,8 +56,57 @@ BEGIN_PROVIDER [integer, nnz_max_per_row]
 
 END_PROVIDER
 
+
+subroutine sparse_csr_dmv(A_v, A_c, A_p, x, y, sze, nnz)
+    implicit none
+    BEGIN_DOC
+    ! Compute the matrix vector product y = Ax with sparse A in CSR format
+    ! Not general. Assumes A is sze x sze; x, y are sze
+    END_DOC
+
+    integer,          intent(in)  :: sze, nnz, A_c(nnz), A_p(sze+1)
+    double precision, intent(in)  :: A_v(nnz), x(sze)
+    double precision, intent(out) :: y(sze)
+    integer                      :: i, j
+
+    ! loop over rows
+    !$OMP PARALLEL DO PRIVATE(i, j) SHARED(y, x, A_c, A_p, A_v, sze)&
+    !$OMP SCHEDULE(GUIDED)
+    do i = 1, sze
+        ! loop over columns
+        do j = A_p(i), A_p(i+1)-1
+            y(i) = y(i) + A_v(j) * x(A_c(j))
+        end do
+    end do
+    !$OMP END PARALLEL DO
+end
+
+subroutine sparse_csr_zmv(A_v, A_c, A_p, x, y, sze, nnz)
+    implicit none
+    BEGIN_DOC
+    ! Compute the matrix vector product y = Ax with sparse A in CSR format
+    ! Not general. Assumes A is sze x sze; x, y are sze
+    END_DOC
+
+    integer,          intent(in)  :: sze, nnz, A_c(nnz), A_p(sze+1)
+    complex*16,       intent(in)  :: A_v(nnz), x(sze)
+    complex*16,       intent(out) :: y(sze)
+    integer                      :: i, j
+
+    ! loop over rows
+    !$OMP PARALLEL DO PRIVATE(i, j) SHARED(y, x, A_c, A_p, A_v, sze)&
+    !$OMP SCHEDULE(GUIDED)
+    do i = 1, sze
+        ! loop over columns
+        do j = A_p(i), A_p(i+1)-1
+            y(i) = y(i) + A_v(j) * x(A_c(j))
+        end do
+    end do
+    !$OMP END PARALLEL DO
+end
+
 ! to convert to provider, provide all 4 array for intel MKL CSR representation
-subroutine form_sparse_dH(finished)
+subroutine form_sparse_dH(csr_s, csr_c, csr_v, sze)
     ! use MKL_SPBLAS
 
     implicit none
@@ -66,28 +115,32 @@ subroutine form_sparse_dH(finished)
     ! in the space of the determinants
     END_DOC
 
-    logical              :: finished
-    integer              :: n, i, j, k, l_row, degree
+    integer, intent(in)           :: sze
+    integer, intent(out)          :: csr_s(N_det+1), csr_c(sze)
+    double precision, intent(out) :: csr_v(sze)
+
+    integer              :: n, i, j, k, l_row
     integer              :: nnz, nnz_cnt, nnz_tot
     integer              :: n_vals, n_vals_row, n_threads, ID
-    integer, allocatable :: nnz_arr(:), coo_r(:), coo_c(:), k_arr(:)
-    integer, allocatable :: coo_r_all(:), coo_c_all(:), coo_r_t(:), coo_c_t(:)
-    integer, allocatable :: l_cols(:)
+    integer              :: nnz_csr, ii, scn_a, kk
     integer :: OMP_get_num_threads, OMP_get_thread_num
-    double precision     :: hij, frac, phase
+    integer, allocatable :: nnz_arr(:), coo_r(:), coo_c(:), k_arr(:), l_cols(:)
+    integer, allocatable :: coo_r_all(:), coo_c_all(:), coo_r_t(:), coo_c_t(:)
+    integer, allocatable :: coo_s(:), coo_n(:)
+
+    double precision     :: hij, frac
     double precision, allocatable :: coo_v(:), coo_v_t(:), coo_v_all(:)
-    integer                        :: exc(0:2,2,2)
+    
 
     ! force provide early so that threads don't each try to provide
     call i_H_j(psi_det(:,:,1), psi_det(:,:,1), N_int, hij) 
     
-    !$OMP PARALLEL SHARED(n, nnz_tot, nnz_arr, n_threads, psi_det, N_int, nnz_max_per_row) &
-    !$OMP PRIVATE(i,j,k, phase, degree, exc, hij, nnz, nnz_cnt, ID, coo_r, coo_c, coo_v, coo_r_t, coo_c_t, coo_v_t, l_cols, l_row) 
+    !$OMP PARALLEL SHARED(nnz_tot, nnz_arr, n_threads, psi_det, N_det, N_int, nnz_max_per_row, n_vals_row)&
+    !$OMP PRIVATE(i,j,k, hij, nnz, nnz_cnt, ID, coo_r, coo_c, coo_v, coo_r_t, coo_c_t, coo_v_t, l_cols, l_row) 
     !$ n_threads = OMP_get_num_threads()
     !$ ID = OMP_get_thread_num() + 1
-    n = N_det
     frac = 0.2
-    n_vals = max(nint(n*n*frac/n_threads), 128)
+    n_vals = max(nint(N_det*N_det*frac/n_threads), 128)
     n_vals_row = 10*ceiling(sqrt(real(nnz_max_per_row)))
 
     allocate(coo_r(n_vals))
@@ -101,74 +154,17 @@ subroutine form_sparse_dH(finished)
     !$OMP END SINGLE
 
     nnz_cnt = 0
-    ! !$OMP DO SCHEDULE(GUIDED)
-    ! do i = 1, n
-    !     do j = i, n
-    !         call i_H_j(psi_det(:,:,i), psi_det(:,:,j),N_int, hij)
-
-    !         ! hij = h_matrix_all_dets(i,j)
-    !         if (abs(hij) > 1e-17) then
-    !         !     if (i == 1) then
-    !         !         degree = 0
-    !         !         call get_excitation_degree(psi_det(:,:,i),&
-    !         !                                    psi_det(:,:,j),&
-    !         !                                    degree, N_int)
-
-    !         !         if (degree == 1) then
-    !         !             call get_single_excitation(psi_det(:,:,i),&
-    !         !                                        psi_det(:,:,j),&
-    !         !                                        exc,phase,N_int)
-    !         !         else if (degree == 2) then
-    !         !             call get_double_excitation(psi_det(:,:,i),&
-    !         !                                        psi_det(:,:,j),&
-    !         !                                        exc,phase,N_int)
-    !         !         end if
-
-    !         !         write(*, '(A20, I10, I10, I10, I4, I4)'), "i, j, degree: ", i, j, degree, exc(0,1,1), exc(0,1,2)
-    !         !     end if
-    !             nnz_cnt += 1
-
-    !             if (nnz_cnt <= size(coo_r, 1)) then
-    !               coo_r(nnz_cnt) = i
-    !               coo_c(nnz_cnt) = j
-    !               coo_v(nnz_cnt) = hij
-    !             else
-    !               ! dynamically increase array size on thread
-    !               print *, 'allocating'
-    !               allocate(coo_r_t(nnz_cnt + 1024))
-    !               allocate(coo_c_t(nnz_cnt + 1024))
-    !               allocate(coo_v_t(nnz_cnt + 1024))
-                  
-    !               coo_r_t(:nnz_cnt-1) = coo_r
-    !               coo_c_t(:nnz_cnt-1) = coo_c
-    !               coo_v_t(:nnz_cnt-1) = coo_v
-                  
-    !               coo_r_t(nnz_cnt) = i
-    !               coo_c_t(nnz_cnt) = j
-    !               coo_v_t(nnz_cnt) = hij
-
-    !               call move_alloc(coo_r_t, coo_r)
-    !               call move_alloc(coo_c_t, coo_c)
-    !               call move_alloc(coo_v_t, coo_v)
-    !             end if
-
-    !         end if
-    !     end do
-    ! end do
-    ! !$OMP END DO
-
-    nnz_cnt = 0
     !$OMP DO SCHEDULE(GUIDED)
-    do i = 1, n
+    do i = 1, N_det
         nnz = 0
         l_cols = 0
         call get_sparse_columns(i, l_cols, nnz, n_vals_row)
 
         ! reallocate arrays if necessary
         if (nnz_cnt + nnz + 1 > size(coo_r, 1)) then
-            allocate(coo_r_t(nnz + 1024))
-            allocate(coo_c_t(nnz + 1024))
-            allocate(coo_v_t(nnz + 1024))
+            allocate(coo_r_t(nnz_cnt + 1024))
+            allocate(coo_c_t(nnz_cnt + 1024))
+            allocate(coo_v_t(nnz_cnt + 1024))
             
             coo_r_t(:nnz_cnt) = coo_r
             coo_c_t(:nnz_cnt) = coo_c
@@ -183,14 +179,14 @@ subroutine form_sparse_dH(finished)
         l_row = l_cols(1)
         do j = 1, nnz+1
             nnz_cnt += 1
+            ! print *, l_row, l_cols(j)
             call i_H_j(psi_det(:,:,l_row),&
-                       psi_det(:,:,l_cols(j)), N_int, hij)
-
+            psi_det(:,:,l_cols(j)), N_int, hij)
+            
             coo_r(nnz_cnt) = l_row
             coo_c(nnz_cnt) = l_cols(j)
             coo_v(nnz_cnt) = hij
         end do
-        
     end do
     !$OMP END DO
 
@@ -219,32 +215,22 @@ subroutine form_sparse_dH(finished)
     end do
     !$OMP END PARALLEL
 
-    ! ! convert to sparse matrix in CSR format
-    ! type(SPARSE_MATRIX_T) :: sH
-    ! integer               :: status, mkl_d_create_coo
-
-    ! status = mkl_d_create_coo(sH, SPARSE_INDEX_BASE_ONE, &
-    !                           n, n, nnz_tot,&
-    !                           coo_r_all, coo_c_all, coo_v_all)
-
-    integer              :: nnz_csr, ii, scn_a, kk
-    integer, allocatable :: coo_s(:), coo_n(:), csr_s(:), csr_c(:)
-    double precision, allocatable :: csr_v(:)
-
-    !$OMP PARALLEL SHARED(n, nnz_csr, coo_r_all, coo_c_all, coo_v_all, csr_s, csr_c, csr_v, coo_s, coo_n, k_arr, n_threads)&
+    
+    ! convert to sparse matrix in CSR format
+    !$OMP PARALLEL SHARED(N_det, nnz_csr, coo_r_all, coo_c_all, coo_v_all, csr_s, csr_c, csr_v, coo_s, coo_n, k_arr, n_threads)&
     !$OMP PRIVATE(i,j,ii, scn_a, ID)
     !$ n_threads = OMP_get_num_threads()
     !$ ID = OMP_get_thread_num() + 1
 
-    nnz_csr = 2*nnz_tot-n! COO was taken from upper triangle, account for double counting of diagonal
+    nnz_csr = 2*nnz_tot-N_det! COO was taken from upper triangle, account for double counting of diagonal
 
     !$OMP SINGLE
-    allocate(coo_s(n), coo_n(n), csr_s(n+1), csr_c(nnz_csr), csr_v(nnz_csr))
+    allocate(coo_s(N_det), coo_n(N_det))
     !$OMP END SINGLE
 
     ! calculate the starting index of each row in COO, since they were not sorted
     !$OMP DO SCHEDULE(GUIDED)
-    do i = 1, n
+    do i = 1, N_det
         j = 1
         do while(coo_r_all(j) .ne. i)
             j += 1
@@ -268,11 +254,11 @@ subroutine form_sparse_dH(finished)
 
     !$OMP SINGLE
     csr_s(1) = 1
-    csr_s(n+1) = 1 
+    csr_s(N_det+1) = 1 
     !$OMP END SINGLE
     
     !$OMP DO SCHEDULE(GUIDED) 
-    do i = 2, n+1
+    do i = 2, N_det+1
         k = 0 ! count all entries with column i-1
         do j = 1, nnz_tot
             k = k + merge(1,0,coo_c_all(j)==i-1)
@@ -286,20 +272,19 @@ subroutine form_sparse_dH(finished)
     !$OMP SINGLE
     scn_a = 0
     !$OMP SIMD REDUCTION(inscan, +:scn_a)
-    do i = 1, n+1
+    do i = 1, N_det+1
         scn_a = scn_a + csr_s(i)
         !$OMP SCAN INCLUSIVE(scn_a)
         csr_s(i) = scn_a
     end do
     !$OMP END SINGLE
     !$OMP BARRIER
-    
 
     ! loop through rows and construct CSR matrix
     !$OMP DO SCHEDULE(GUIDED)
-    do i = 1, n
+    do i = 1, N_det
         k = 0
-        do j = 1, i-1 !TODO: possible to only loop over number of entries?
+        do j = 1, i-1
             ! get pre-diagonal entries
             ! search jth row for column i
             do ii = coo_s(j)+1, coo_s(j) + coo_n(j) -1
@@ -322,66 +307,9 @@ subroutine form_sparse_dH(finished)
     !$OMP END DO
     !$OMP END PARALLEL
 
-    print *, 'CSR representation'
-    print *, size(csr_v, 1), size(csr_c,1)
-    print *, csr_s
-
-
-    finished = .TRUE.
 end
-
-subroutine sparse_csr_dmv(A_v, A_c, A_p, x, y, sze, nnz)
-    implicit none
-    BEGIN_DOC
-    ! Compute the matrix vector product y = Ax with sparse A in CSR format
-    ! Not general. Assumes A is sze x sze; x, y are sze
-    END_DOC
-
-    integer,          intent(in)  :: sze, nnz, A_c(nnz), A_p(sze+1)
-    double precision, intent(in)  :: A_v(nnz), x(sze)
-    double precision, intent(out) :: y(sze)
-    integer                      :: i, j
-
-    ! loop over rows
-    !$OMP PARALLEL DO PRIVATE(i, j, sze) SHARED(y, x, A_c, A_p, A_v)&
-    !$OMP SCHEDULE(GUIDED)
-    do i = 1, sze
-        ! loop over columns
-        do j = A_p(i), A_p(i+1)-1
-            y(i) = y(i) + A_v(j) * x(A_c(j))
-        end do
-    end do
-    !$OMP END PARALLEL DO
-end
-
-subroutine sparse_csr_zmv(A_v, A_c, A_p, x, y, sze, nnz)
-    implicit none
-    BEGIN_DOC
-    ! Compute the matrix vector product y = Ax with sparse A in CSR format
-    ! Not general. Assumes A is sze x sze; x, y are sze
-    END_DOC
-
-    integer,          intent(in)  :: sze, nnz, A_c(nnz), A_p(sze+1)
-    complex*16,       intent(in)  :: A_v(nnz), x(sze)
-    complex*16,       intent(out) :: y(sze)
-    integer                      :: i, j
-
-    ! loop over rows
-    !$OMP PARALLEL DO PRIVATE(i, j, sze) SHARED(y, x, A_c, A_p, A_v)&
-    !$OMP SCHEDULE(GUIDED)
-    do i = 1, sze
-        ! loop over columns
-        do j = A_p(i), A_p(i+1)-1
-            y(i) = y(i) + A_v(j) * x(A_c(j))
-        end do
-    end do
-    !$OMP END PARALLEL DO
-end
-
 
 subroutine get_sparse_columns(k_a, columns, nnz, nnz_max)
-    ! needs to be a function, not a subroutine, if output size is unknown
-
     ! this whole function should be within a parallel loop over N_det
     ! the final output is the list of indices of off diagonal terms, sorted by column
     ! for the thread in the mainloop to calculate the (non-zero) matrix elements H_i, j>i
@@ -392,19 +320,18 @@ subroutine get_sparse_columns(k_a, columns, nnz, nnz_max)
     integer, intent(out)     :: nnz, columns(nnz_max)
     integer :: i, j, k, k_b
     integer :: krow, kcol, lrow, lcol
-    integer :: lidx, kidx, tidx, n_buffer, n_buffer_a_all, n_buffer_b_all
+    integer :: lidx, kidx, tidx, n_buffer
     integer :: n_singles_a, n_singles_b, n_doubles_aa, n_doubles_bb, n_doubles_ab
-    integer :: n_singles_a_all, n_singles_b_all, n_buffer_old, n_doubles_ab_tot, n_doubles_ab_max
+    integer :: n_buffer_old, n_doubles_ab_tot
     integer :: n_off_diagonal, n_offset, tdegree
 
     integer(bit_kind) :: ref_det(N_int, 2), tmp_det(N_int, 2), tmp_det2(N_int, 2), sdet_a(N_int), sdet_b(N_int)
-    integer(bit_kind), allocatable    :: buffer(:,:), buffer_b_all(:,:)
-    integer, allocatable              :: singles_a(:), singles_a_all(:), singles_b(:), singles_b_all(:)
+    integer(bit_kind), allocatable    :: buffer(:,:)
+    integer, allocatable              :: singles_a(:), singles_b(:)
     integer, allocatable              :: doubles_aa(:), doubles_bb(:), doubles_ab(:)
     integer, allocatable              :: idx(:), idx_b_all(:), all_idx(:), srt_idx(:)
     
     allocate(buffer(N_int, N_det), idx(N_det))
-    allocate(buffer_b_all(N_int, N_det), idx_b_all(N_det))
 
     n_singles_a = 0
     n_singles_b = 0
@@ -418,91 +345,48 @@ subroutine get_sparse_columns(k_a, columns, nnz, nnz_max)
     ref_det(:,1) = psi_det_alpha_unique(:, krow)
     ref_det(:,2) = psi_det_beta_unique (:, kcol)
     
-    ! check if determinant can accept electron
-    ! iorb = elec_alpha_num + 1
-    ! ispin = 1
-    ! call orb_is_filled(tmp_det, iorb, ispin, N_int, filled)
-
     ! Finding (1,0) and (2,0) excitations
     ! loop over same beta different alpha
     n_buffer = 0
-    n_buffer_a_all = 0
     do i = psi_bilinear_matrix_columns_loc(kcol), psi_bilinear_matrix_columns_loc(kcol+1)-1
         lidx = psi_bilinear_matrix_order(i)
         
+        if (lidx <= kidx) cycle
+
         lcol = psi_bilinear_matrix_columns(i)
         lrow = psi_bilinear_matrix_rows(i)
         
         tmp_det(:,1) = psi_det_alpha_unique(:, lrow)
         tmp_det(:,2) = psi_det_beta_unique (:, lcol)
         
-        n_buffer_a_all += 1
-        buffer_b_all(:, n_buffer_a_all) = tmp_det(:,2)
-        idx_b_all(n_buffer_a_all) = lidx
-
         ! add determinant to buffer
         ! buffer is list of alpha spin determinants
-        if (lidx <= kidx) cycle
         n_buffer += 1
         buffer(:,n_buffer) = tmp_det(:,1)
         idx(n_buffer) = lidx
     end do
 
     allocate(singles_a(n_buffer), doubles_aa(n_buffer))
-    allocate(singles_a_all(n_buffer_a_all))
 
     sdet_a = ref_det(:,1)
     call get_all_spin_singles_and_doubles(buffer, idx, sdet_a, &
                         N_int, n_buffer, singles_a, doubles_aa, n_singles_a, n_doubles_aa)
 
-    call get_all_spin_singles(buffer_b_all, idx_b_all, sdet_a, &
-                        N_int, n_buffer_a_all, singles_a_all, n_singles_a_all)
-
-    deallocate(buffer, idx, buffer_b_all, idx_b_all)
+    deallocate(buffer, idx)
     allocate(buffer(N_int, N_det), idx(N_det))
-    allocate(buffer_b_all(N_int, N_det), idx_b_all(N_det))
-
-    tdegree = 0
-    ! print*, "--- Checking single alpha"
-    ! do i = 1, n_singles_a
-
-    !     call get_excitation_degree(ref_det, psi_det(:,:,singles_a(i)),degree, N_int)
-
-    !     if (degree /= 1) then
-    !         write(*, '(A20, I10, I10, I10)'), "i, j, degree: ", kidx, singles_a(i), degree  
-    !     end if
-    ! end do
-
-    ! print*, "--- Checking double alpha"
-    ! do i = 1, n_doubles_aa
-
-    !     call get_excitation_degree(ref_det, psi_det(:,:,doubles_aa(i)),degree, N_int)
-
-    !     if (degree /= 2) then
-    !         write(*, '(A20, I10, I10, I10)'), "i, j, degree: ", kidx, doubles_aa(i), degree  
-    !     end if
-    ! end do
-
-
 
     ! Finding (0,1) and (0,2) excitations 
     k_b = psi_bilinear_matrix_order_transp_reverse(k_a)
     krow = psi_bilinear_matrix_transp_rows(k_b) !this is unnecessary, technically
     kcol = psi_bilinear_matrix_transp_columns(k_b)
     
-    ! check if determinant can accept electron
-    ! iorb = elec_alpha_num + 1
-    ! ispin = 1
-    ! call orb_is_filled(tmp_det, iorb, ispin, N_int, filled)
-    ! call print_det(tmp_det, N_int)
-
     ! loop over same alpha different beta
     n_buffer = 0
-    n_buffer_b_all = 0
     do i = psi_bilinear_matrix_transp_rows_loc(krow), psi_bilinear_matrix_transp_rows_loc(krow+1)-1
         tidx = psi_bilinear_matrix_order_transp_reverse(i)
         lidx = psi_bilinear_matrix_order(tidx)
 
+        if (lidx <= kidx) cycle
         
         lcol = psi_bilinear_matrix_transp_columns(i)
         lrow = psi_bilinear_matrix_transp_rows(i)
@@ -510,81 +394,22 @@ subroutine get_sparse_columns(k_a, columns, nnz, nnz_max)
         tmp_det(:,1) = psi_det_alpha_unique(:, lrow)
         tmp_det(:,2) = psi_det_beta_unique (:, lcol)
                 
-        ! keep an extra buffer for (1,1) full accounting
-        n_buffer_b_all += 1
-        buffer_b_all(:, n_buffer_b_all) = tmp_det(:,2)
-        idx_b_all(n_buffer_b_all) = lidx
-        
         ! add determinant to buffer
         ! buffer is list of beta spin determinants
-        if (lidx <= kidx) cycle
-
         n_buffer += 1
         buffer(:,n_buffer) = tmp_det(:,2)
         idx(n_buffer) = lidx
     end do
     
     allocate(singles_b(n_buffer), doubles_bb(n_buffer))
-    allocate(singles_b_all(n_buffer_b_all))
     sdet_b = ref_det(:,2)
     call get_all_spin_singles_and_doubles(buffer, idx, sdet_b, &
                         N_int, n_buffer, singles_b, doubles_bb, n_singles_b, n_doubles_bb)
+                        
+    deallocate(buffer, idx)
 
-    call get_all_spin_singles(buffer_b_all, idx_b_all, sdet_b, &
-                            N_int, n_buffer_b_all, singles_b_all, n_singles_b_all)
-    
-    ! print*, "--- Checking single beta"
-    ! do i = 1, n_singles_b
-
-    !     call get_excitation_degree(ref_det, psi_det(:,:,singles_b(i)),degree, N_int)
-
-    !     if (degree /= 1) then
-    !         write(*, '(A20, I10, I10, I10)'), "i, j, degree: ", kidx, singles_b(i), degree  
-    !     end if
-    ! end do
-
-    ! print*, "--- Checking double beta"
-    ! do i = 1, n_doubles_bb
-
-    !     call get_excitation_degree(ref_det, psi_det(:,:,doubles_bb(i)),degree, N_int)
-
-    !     if (degree /= 2) then
-    !         write(*, '(A20, I10, I10, I10)'), "i, j, degree: ", kidx, doubles_bb(i), degree  
-    !     end if
-    ! end do
-                    
     ! Finding (1,1) excitations
-    deallocate(buffer, idx, buffer_b_all, idx_b_all)
     allocate(buffer(N_int, N_det), idx(N_det))
-
-    ! need to iterate over single excitations over a small set of determinants
-    ! and need to add new (1,1) determinants, but without transferring allocation
-    ! after each new set
-
-    ! create long term storage buffers that upper bound total ab excitations
-    n_doubles_ab_max = 0
-    do j = 1, n_singles_b_all
-        k = psi_bilinear_matrix_order_reverse(singles_b_all(j))
-        kcol = psi_bilinear_matrix_columns(k)
-        n_doubles_ab_max += psi_bilinear_matrix_columns_loc(kcol+1)&
-                        - psi_bilinear_matrix_columns_loc(kcol)
-    end do
-
-    do j = 1, n_singles_a_all
-        k = psi_bilinear_matrix_order_reverse(singles_a_all(j))
-        k = psi_bilinear_matrix_order_transp_reverse(k)
-        kcol = psi_bilinear_matrix_transp_rows(k)
-        n_doubles_ab_max += psi_bilinear_matrix_columns_loc(kcol+1)&
-                        - psi_bilinear_matrix_columns_loc(kcol)
-    end do
-
-    n_doubles_ab_max -= n_singles_b_all ! these won't get included in buffers but are in pointer ranges
-    n_doubles_ab_max -= n_singles_a_all
-
-    ! n_doubles_ab_max will always be larger than the sum of n_buffer across all iterations
-    ! n_doubles_ab_tot will always be smaller than n_buffer 
-    ! in the end, only first n_doubles_ab_tot values should be needed
-
     allocate(doubles_ab(N_det))
 
     n_buffer = 0
@@ -594,13 +419,11 @@ subroutine get_sparse_columns(k_a, columns, nnz, nnz_max)
     ! start from (0,1) to excite to (1,1)
     do j = 1, n_det_beta_unique
 
-        ! k = psi_bilinear_matrix_order_reverse(singles_b_all(j))
-        ! krow = psi_bilinear_matrix_rows(k)
         kcol = psi_bilinear_matrix_columns(k)
 
-        ! tmp_det2(:,1) = psi_det_alpha_unique(:, krow)
         tmp_det2(:,2) = psi_det_beta_unique (:, j)
 
+        ! check if a single excitation different
         tdegree = 0
         do i = 1, N_int
             tdegree += popcnt(ieor(tmp_det2(i,2), ref_det(i,2)))
@@ -609,12 +432,6 @@ subroutine get_sparse_columns(k_a, columns, nnz, nnz_max)
         if (tdegree /= 2) then
             cycle
         end if
-
-        ! print *, '########'
-        ! call print_det(tmp_det2, N_int)
-        ! print *, '#####'
-
-        ! call print_det(psi_det(:,:,singles_b(j)), N_int)
 
         ! loop over same beta different alpha
         do i = psi_bilinear_matrix_columns_loc(j), psi_bilinear_matrix_columns_loc(j+1)-1
@@ -627,10 +444,6 @@ subroutine get_sparse_columns(k_a, columns, nnz, nnz_max)
 
             tmp_det(:,1) = psi_det_alpha_unique(:, lrow)
             tmp_det(:,2) = psi_det_beta_unique (:, lcol)
-
-            ! call orb_is_filled(tmp_det, iorb, ispin, N_int, filled)
-            
-            ! if (filled) cycle
 
             ! add determinant to buffer
             ! buffer is list of alpha spin determinants
@@ -648,72 +461,7 @@ subroutine get_sparse_columns(k_a, columns, nnz, nnz_max)
 
         n_buffer_old = n_buffer
         n_doubles_ab_tot += n_doubles_ab
-        
     end do
-
-
-    ! ! start from (1,0) to excite to (1,1)
-    ! do j = 1, n_singles_a_all
-
-    !     k = psi_bilinear_matrix_order_reverse(singles_a_all(j))
-    !     k = psi_bilinear_matrix_order_transp_reverse(k)
-    !     krow = psi_bilinear_matrix_transp_rows(k)
-    !     kcol = psi_bilinear_matrix_transp_columns(k)
-
-    !     tmp_det2(:,1) = psi_det_alpha_unique(:, krow)
-    !     tmp_det2(:,2) = psi_det_beta_unique (:, kcol)
-
-    !     ! print *, '########'
-    !     ! call print_det(tmp_det2, N_int)
-    !     ! print *, '####'
-    !     ! call print_det(psi_det(:,:,singles_a(j)), N_int)
-
-    !     ! loop over same beta different alpha
-    !     do i = psi_bilinear_matrix_transp_rows_loc(kcol), psi_bilinear_matrix_transp_rows_loc(kcol+1)-1
-    !         tidx = psi_bilinear_matrix_order_transp_reverse(i)
-    !         lidx = psi_bilinear_matrix_order(tidx)
-
-    !         if (lidx <= kidx) cycle
-
-    !         lcol = psi_bilinear_matrix_transp_columns(i)
-    !         lrow = psi_bilinear_matrix_transp_rows(i)
-
-    !         tmp_det(:,1) = psi_det_alpha_unique(:, lrow)
-    !         tmp_det(:,2) = psi_det_beta_unique (:, lcol)
-
-    !         ! call orb_is_filled(tmp_det, iorb, ispin, N_int, filled)
-            
-    !         ! if (filled) cycle
-
-    !         ! add determinant to buffer
-    !         ! buffer is list of alpha spin determinants
-    !         n_buffer += 1
-    !         buffer(:,n_buffer) = tmp_det(:,2)
-    !         idx(n_buffer) = lidx
-    !     end do
-
-    !     sdet_b = tmp_det2(:,2)
-    !     call get_all_spin_singles(buffer(:,n_buffer_old+1:n_buffer), idx(n_buffer_old+1:n_buffer),&
-    !                             sdet_b, N_int, n_buffer-n_buffer_old,&
-    !                             doubles_ab(n_doubles_ab_tot+1:n_doubles_ab_tot+n_buffer-n_buffer_old),&
-    !                             n_doubles_ab)
-
-
-    !     n_buffer_old = n_buffer
-    !     n_doubles_ab_tot += n_doubles_ab
-        
-    ! end do
-
-    ! check ab doubles
-    ! print*, "--- Checking double alpha/beta"
-    ! degree = 0
-    ! do i = 1, n_doubles_ab
-    !     call get_excitation_degree(ref_det, psi_det(:,:,doubles_ab(i)),degree, N_int)
-
-    !     ! if (degree /= 2) then
-    !     write(*, '(A20, I10, I10, I10)'), "i, j, degree: ", kidx, doubles_ab(i), degree  
-    !     ! end if
-    ! end do
 
     ! add all indices into list and sort
     ! number of off-diagonal terms needed to caclulate to fill this row in sparse Hamlitonian
@@ -740,30 +488,13 @@ subroutine get_sparse_columns(k_a, columns, nnz, nnz_max)
                             n_offset           += n_doubles_bb
 
 
-    ! print *, '------ alpha singles', n_singles_a
-    ! print *, singles_a(:n_singles_a)
-
-    ! print *, '------ beta singles', n_singles_b
-    ! print *, singles_b(:n_singles_b)
-
-    ! print *, '------ alpha doubles', n_doubles_aa
-    ! print *, doubles_aa(:n_doubles_aa)
-
-    ! print *, '------ beta doubles', n_doubles_bb
-    ! print *, doubles_bb(:n_doubles_bb)
-
-    ! print *, '------ alpha/beta doubles', n_doubles_ab_tot
-    ! print *, doubles_ab(:n_doubles_ab_tot)
-
     call insertion_isort(all_idx, srt_idx, n_off_diagonal+1)
-
-    ! print *, '----- all idx', all_idx
 
     deallocate(buffer, idx, singles_a, doubles_aa,&
                 singles_b, doubles_bb, doubles_ab,&
                 srt_idx)
 
-    columns = all_idx
+    columns(:n_off_diagonal+1) = all_idx
     nnz = n_off_diagonal
 
 end
