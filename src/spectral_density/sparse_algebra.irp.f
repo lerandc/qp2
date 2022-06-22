@@ -48,11 +48,8 @@ BEGIN_PROVIDER [integer, nnz_max_per_row]
     d_b = ( elec_beta_num * (elec_beta_num - 1) / 2) * &
     ( (mo_num - elec_beta_num) * (mo_num - elec_beta_num - 1) / 2)
     
-    print *, elec_alpha_num, elec_beta_num, mo_num
-    print *, s_a, s_b, d_a, d_b
     nnz_max_per_row = 1 + s_a + s_b + s_a*s_b + d_a + d_b
     nnz_max_tot = N_det * nnz_max_per_row
-    print *, nnz_max_per_row
 
 END_PROVIDER
 
@@ -139,7 +136,7 @@ subroutine form_sparse_dH(csr_s, csr_c, csr_v, sze)
     !$ ID = OMP_get_thread_num() + 1
     frac = 0.2
     n_vals = max(nint(N_det*N_det*frac/n_threads), 128)
-    n_vals_row = 10*ceiling(sqrt(real(nnz_max_per_row)))
+    n_vals_row = nnz_max_per_row
 
     allocate(coo_r(n_vals))
     allocate(coo_c(n_vals))
@@ -151,6 +148,11 @@ subroutine form_sparse_dH(csr_s, csr_c, csr_v, sze)
     nnz_tot = 0
     !$OMP END SINGLE
 
+    !$OMP SINGLE
+    print *, "## Pre-sparse columns"
+    !$OMP END SINGLE
+    !$OMP BARRIER
+
     nnz_cnt = 0
     !$OMP DO SCHEDULE(GUIDED)
     do i = 1, N_det
@@ -160,9 +162,9 @@ subroutine form_sparse_dH(csr_s, csr_c, csr_v, sze)
 
         ! reallocate arrays if necessary
         if (nnz_cnt + nnz + 1 > size(coo_r, 1)) then
-            allocate(coo_r_t(nnz_cnt + 1024))
-            allocate(coo_c_t(nnz_cnt + 1024))
-            allocate(coo_v_t(nnz_cnt + 1024))
+            allocate(coo_r_t(nnz_cnt + 10*nnz))
+            allocate(coo_c_t(nnz_cnt + 10*nnz))
+            allocate(coo_v_t(nnz_cnt + 10*nnz))
             
             coo_r_t(:nnz_cnt) = coo_r
             coo_c_t(:nnz_cnt) = coo_c
@@ -177,7 +179,6 @@ subroutine form_sparse_dH(csr_s, csr_c, csr_v, sze)
         l_row = l_cols(1)
         do j = 1, nnz+1
             nnz_cnt += 1
-            ! print *, l_row, l_cols(j)
             call i_H_j(psi_det(:,:,l_row),&
             psi_det(:,:,l_cols(j)), N_int, hij)
             
@@ -196,6 +197,12 @@ subroutine form_sparse_dH(csr_s, csr_c, csr_v, sze)
     !$OMP BARRIER
 
     !$OMP SINGLE
+    print *, "## Post-sparse columns"
+    !$OMP END SINGLE
+    !$OMP BARRIER
+    
+
+    !$OMP SINGLE
     allocate(coo_r_all(nnz_tot))
     allocate(coo_c_all(nnz_tot))
     allocate(coo_v_all(nnz_tot))
@@ -206,13 +213,13 @@ subroutine form_sparse_dH(csr_s, csr_c, csr_v, sze)
         k += nnz_arr(i)
     end do
 
-    do i = k+1, k + nnz_arr(ID)
-        coo_r_all(i) = coo_r(i-k)
-        coo_c_all(i) = coo_c(i-k)
-        coo_v_all(i) = coo_v(i-k)
-    end do
+    coo_r_all(k+1:k+nnz_arr(ID)) = coo_r
+    coo_c_all(k+1:k+nnz_arr(ID)) = coo_c
+    coo_v_all(k+1:k+nnz_arr(ID)) = coo_v
     !$OMP END PARALLEL
 
+    !TODO: at this point, you should check that sze >= nnz_csr
+    print *, "nnz_csr: ", 2*nnz_tot-N_det, " max sze:", sze
     
     ! convert to sparse matrix in CSR format
     !$OMP PARALLEL SHARED(N_det, nnz_csr, coo_r_all, coo_c_all, coo_v_all, csr_s, csr_c, csr_v, coo_s, coo_n, k_arr, n_threads)&
@@ -226,7 +233,18 @@ subroutine form_sparse_dH(csr_s, csr_c, csr_v, sze)
     allocate(coo_s(N_det), coo_n(N_det))
     !$OMP END SINGLE
 
+    !$OMP SINGLE
+    print *, "## COO pointers"
+    !$OMP END SINGLE
+    !$OMP BARRIER
+
     ! calculate the starting index of each row in COO, since they were not sorted
+
+    ! this requires a lot of looping over the arrays
+    ! the better way to do this is to split the entries of coo_r_all over 
+    ! NUM_THREADS; each thread scans over a section of array; records start in coo_s;
+    ! records stop in coo_n; coo_n = coo_n - coo_s + 1
+    ! probably could simultaneously count columns, which are needed for CSR pointers
     !$OMP DO SCHEDULE(GUIDED)
     do i = 1, N_det
         j = 1
@@ -249,6 +267,12 @@ subroutine form_sparse_dH(csr_s, csr_c, csr_v, sze)
     ! row i data goes from csr_s(i) to csr_s(i+1) - 1
     ! first, count all entries in parallel, then perform scan to set pointer ranges
     ! then reduce with inclsuive scan
+
+    !$OMP SINGLE
+    print *, "## Pre csr pointers"
+    !$OMP END SINGLE
+    !$OMP BARRIER
+    
 
     !$OMP SINGLE
     csr_s(1) = 1
@@ -278,6 +302,11 @@ subroutine form_sparse_dH(csr_s, csr_c, csr_v, sze)
     !$OMP END SINGLE
     !$OMP BARRIER
 
+    !$OMP SINGLE
+    print *, "## Pre csr construction"
+    !$OMP END SINGLE
+    !$OMP BARRIER
+    
     ! loop through rows and construct CSR matrix
     !$OMP DO SCHEDULE(GUIDED)
     do i = 1, N_det
@@ -293,9 +322,9 @@ subroutine form_sparse_dH(csr_s, csr_c, csr_v, sze)
                     exit
                 end if
             end do
-        ! get diagonal+ entries
         end do
         
+        ! get diagonal+ entries
         do ii = coo_s(i), coo_s(i) + coo_n(i) - 1
             csr_v(csr_s(i) + k) = coo_v_all(ii)
             csr_c(csr_s(i) + k) = coo_c_all(ii)
@@ -303,6 +332,12 @@ subroutine form_sparse_dH(csr_s, csr_c, csr_v, sze)
         end do
     end do
     !$OMP END DO
+
+    !$OMP SINGLE
+    print *, "## Post csr construction"
+    !$OMP END SINGLE
+    !$OMP BARRIER
+
     !$OMP END PARALLEL
 
 end
@@ -364,9 +399,9 @@ subroutine form_sparse_zH(csr_s, csr_c, csr_v, sze)
 
         ! reallocate arrays if necessary
         if (nnz_cnt + nnz + 1 > size(coo_r, 1)) then
-            allocate(coo_r_t(nnz_cnt + 1024))
-            allocate(coo_c_t(nnz_cnt + 1024))
-            allocate(coo_v_t(nnz_cnt + 1024))
+            allocate(coo_r_t(nnz_cnt + 10*nnz))
+            allocate(coo_c_t(nnz_cnt + 10*nnz))
+            allocate(coo_v_t(nnz_cnt + 10*nnz))
             
             coo_r_t(:nnz_cnt) = coo_r
             coo_c_t(:nnz_cnt) = coo_c
@@ -546,6 +581,10 @@ subroutine get_sparse_columns(k_a, columns, nnz, nnz_max)
     ref_det(:,1) = psi_det_alpha_unique(:, krow)
     ref_det(:,2) = psi_det_beta_unique (:, kcol)
     
+
+    ! print *, "--------------------------------"
+    ! write(*, "(A8, I10, A8, I10)"), "Iter: ", k_a, " Row: ", kidx
+    ! print *, "Getting alpha singles/doubles"
     ! Finding (1,0) and (2,0) excitations
     ! loop over same beta different alpha
     n_buffer = 0
@@ -576,6 +615,7 @@ subroutine get_sparse_columns(k_a, columns, nnz, nnz_max)
     deallocate(buffer, idx)
     allocate(buffer(N_int, N_det), idx(N_det))
 
+    ! print *, "Getting beta singles/doubles"
     ! Finding (0,1) and (0,2) excitations 
     k_b = psi_bilinear_matrix_order_transp_reverse(k_a)
     krow = psi_bilinear_matrix_transp_rows(k_b) !this is unnecessary, technically
@@ -609,6 +649,7 @@ subroutine get_sparse_columns(k_a, columns, nnz, nnz_max)
                         
     deallocate(buffer, idx)
 
+    ! print *, "Getting alpha beta doubles"
     ! Finding (1,1) excitations
     allocate(buffer(N_int, N_det), idx(N_det))
     allocate(doubles_ab(N_det))
@@ -694,6 +735,10 @@ subroutine get_sparse_columns(k_a, columns, nnz, nnz_max)
     deallocate(buffer, idx, singles_a, doubles_aa,&
                 singles_b, doubles_bb, doubles_ab,&
                 srt_idx)
+
+    ! print *, '------------------------'
+    ! write(*, '(I12, I12, I12, I12)'),k_a, kidx, n_off_diagonal, nnz_max 
+    ! print *, '--------'
 
     columns(:n_off_diagonal+1) = all_idx
     nnz = n_off_diagonal
