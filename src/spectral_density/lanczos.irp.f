@@ -72,7 +72,7 @@ subroutine lanczos_tridiag_reortho_c(H, u0, alpha, beta, k, sze)
     integer, intent(in)             :: k, sze
     integer                         :: i, ii, j, incx, incy
     complex*16, intent(in)          :: H(sze, sze), u0(sze)
-    complex*16                      :: z(sze), uu(sze,k)
+    complex*16                      :: z(sze), z_t(sze), uu(sze,k)
     complex*16                      :: zdotc
     double precision, intent(out)   :: beta(k), alpha(k)
     double precision                :: dznrm2, coef
@@ -95,13 +95,19 @@ subroutine lanczos_tridiag_reortho_c(H, u0, alpha, beta, k, sze)
         end if
 
         do ii = 1, 2 ! repeat process twice
-            !$OMP PARALLEL DO PRIVATE(j, coef) SHARED(sze, incx, incy, uu) &
-            !$OMP REDUCTION(+:z)
+            !$OMP PARALLEL PRIVATE(j, z_t, coef) SHARED(sze, incx, incy, uu, z)
+            z_t = (0.d0, 0.d00)
+            !$OMP DO SCHEDULE(GUIDED)
             do j = 1, i
                 coef = zdotc(sze, z, incx, uu(:,j), incy)
-                z = z - coef * uu(:,j)
+                z_t = z_t - coef * uu(:,j)
             enddo
-            !$OMP END PARALLEL DO
+            !$OMP END DO
+
+            !$OMP CRITICAL
+            z = z - z_t
+            !$OMP END CRITICAL
+            !$OMP END PARALLEL
         enddo 
 
         beta(i+1) = dznrm2(sze, z, incx)
@@ -128,7 +134,7 @@ subroutine lanczos_tridiag_sparse_reortho_c(H_v, H_c, H_p, u0, alpha, beta, k, n
     integer, intent(in)             :: k, sze, nnz, H_c(nnz), H_p(sze+1)
     integer                         :: i, ii, j, incx, incy
     complex*16, intent(in)          :: H_v(nnz), u0(sze)
-    complex*16                      :: z(sze), uu(sze,k)
+    complex*16                      :: z(sze), z_t(sze), uu(sze,k)
     complex*16                      :: zdotc
     double precision, intent(out)   :: beta(k), alpha(k)
     double precision                :: dznrm2, coef
@@ -151,13 +157,19 @@ subroutine lanczos_tridiag_sparse_reortho_c(H_v, H_c, H_p, u0, alpha, beta, k, n
         end if
 
         do ii = 1, 2 ! repeat process twice
-            !$OMP PARALLEL DO PRIVATE(j, coef) SHARED(sze, incx, incy, uu) &
-            !$OMP REDUCTION(+:z)
+            !$OMP PARALLEL PRIVATE(j, z_t, coef) SHARED(sze, incx, incy, uu, z)
+            z_t = (0.d0, 0.d0)
+            !$OMP DO SCHEDULE(GUIDED)
             do j = 1, i
                 coef = zdotc(sze, z, incx, uu(:,j), incy)
-                z = z - coef * uu(:,j)
+                z_t = z_t - coef * uu(:,j)
             enddo
-            !$OMP END PARALLEL DO
+            !$OMP END DO
+
+            !$OMP CRITICAL
+            z = z - z_t
+            !$OMP END CRITICAL
+            !$OMP END PARALLEL
         enddo 
 
         beta(i+1) = dznrm2(sze, z, incx)
@@ -326,10 +338,12 @@ subroutine lanczos_tridiag_sparse_reortho_r(H_v, H_c, H_p, u0, alpha, beta, k, n
         call sparse_csr_dmv(H_v, H_c, H_p, uu(:,i), z, sze, nnz)
         alpha(i) = ddot(sze, z, incx, uu(:,i), incy)
 
+        coef =  dnrm2(sze, z, incx)
+        print *, "znrm: ", coef
         if (i == k) then
             exit
         end if
-
+        
         do ii = 1, 2 ! repeat process twice
             !$OMP PARALLEL PRIVATE(j, z_t, coef) SHARED(sze, incx, incy, uu, z)
             z_t = 0.d0
@@ -339,17 +353,23 @@ subroutine lanczos_tridiag_sparse_reortho_r(H_v, H_c, H_p, u0, alpha, beta, k, n
                 z_t = z_t + coef * uu(:,j)
             enddo
             !$OMP END DO
-
+            
             !$OMP CRITICAL
             z = z - z_t
             !$OMP END CRITICAL
             !$OMP END PARALLEL
+            
+            coef =  dnrm2(sze, z, incx)
+            print *, "znrm: ", coef
         enddo 
         
         beta(i+1) = dnrm2(sze, z, incx)
         if (beta(i+1) < 1e-16) then ! some small number
         ! add some type of escape or warning for beta(i) = 0
-            print *, "escaping early"
+            print *, 'Ending Lanczos algorithm:'
+            write(*, '(A20, I10, A20, E12.4, A20, E12.4)'), 'final iter: ', i, ' final beta', beta(i+1), ' previous beta', beta(i)
+            coef = dnrm2(sze, u0, incx)
+            write(*, '(A20, I10, A20, E12.4, A20, E12.4)'), 'final iter: ', i, ' final alpha', alpha(i), ' u0 norm', coef
             exit
         end if
 

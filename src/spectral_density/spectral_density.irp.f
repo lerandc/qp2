@@ -21,95 +21,52 @@ program spectral_density
         deallocate(psi_det_read)
     end if
 
-    ! allocate(csr_c(nnz_max_per_row), csr_v(nnz_max_per_row), csr_s(N_det+1))
-    ! call form_sparse_dH(csr_s, csr_c, csr_v, nnz_max_per_row)
+    if (is_complex) then 
+        allocate(psi_coef_complex_read(N_det, N_states))
+        call ezfio_get_determinants_psi_coef_complex(psi_coef_complex_read)
+        psi_coef_complex = psi_coef_complex_read
+        deallocate(psi_coef_complex_read)
 
-    ! nnz = csr_s(N_det+1)-1
+        force_reads = size(psi_coef_complex, 1) == N_det_read .and.&
+        size(psi_det, 3)  == N_det_read
+        if(force_reads) then
+            if(spectral_density_calc_A) then
+                call ezfio_set_spectral_density_spectral_density_A_complex(spectral_density_A_complex)
+                if(write_greens_f) then
+                    call ezfio_set_spectral_density_greens_A_complex(greens_A_complex)
+                end if
+            end if 
+            if(spectral_density_calc_R) then
+                call ezfio_set_spectral_density_spectral_density_R_complex(spectral_density_R_complex)
+                if(write_greens_f) then
+                    call ezfio_set_spectral_density_greens_R_complex(greens_R_complex)
+                end if
+            end if
+        end if
+    else
+        allocate(psi_coef_read(N_det, N_states))
+        call ezfio_get_determinants_psi_coef(psi_coef_read)
+        psi_coef = psi_coef_read
+        deallocate(psi_coef_read)
 
-    ! ! shift allocation
-    ! allocate(t_csr_c(nnz), t_csr_v(nnz))
-
-    ! t_csr_c = csr_c(:nnz)
-    ! t_csr_v = csr_v(:nnz)
-
-    ! call move_alloc(t_csr_c, csr_c)
-    ! call move_alloc(t_csr_v, csr_v)
-
-    ! print *, "Sparse arrays formed."
-
-    ! ! test matrix multiply
-    ! u = 1.0 / sqrt(real(N_det))
-    ! v = 0.0
-    ! z = 0.0
-
-    ! call dsymv('U', N_det, 1.d0, h_matrix_all_dets, N_det, u, 1, 0.d0, z, 1)
-
-    ! call sparse_csr_dmv(csr_v, csr_c, csr_s, u, v, N_det, nnz)
-
-    ! err = 0.0
-    ! do i = 1, N_det
-    !     err +=  abs(z(i)-v(i))
-    !     write(*, '(I10, E14.6, E14.6, E14.6)'), i, z(i), v(i), abs(z(i)-v(i))
-    ! end do
-
-    ! write(*, '(A12, E14.6)'), "mae: ", err/N_det
-
-    ! deallocate(csr_c, csr_s, csr_v)
-
-    err = 0.0
-    do i = 1, greens_omega_N
-        err += abs(greens_A(i)-greens_A_sparse(i))
-        ! print*, i, greens_A(i), greens_A_sparse(i), abs(greens_A(i)-greens_A_sparse(i))
-    end do
-
-    write(*, '(A12, E14.6)'), "mae: ", err/greens_omega_N
-
-    ! if (is_complex) then 
-    !     allocate(psi_coef_complex_read(N_det, N_states))
-    !     call ezfio_get_determinants_psi_coef_complex(psi_coef_complex_read)
-    !     psi_coef_complex = psi_coef_complex_read
-    !     deallocate(psi_coef_complex_read)
-
-    !     force_reads = size(psi_coef_complex, 1) == N_det_read .and.&
-    !     size(psi_det, 3)  == N_det_read
-    !     if(force_reads) then
-    !         if(spectral_density_calc_A) then
-    !             call ezfio_set_spectral_density_spectral_density_A_complex(spectral_density_A_complex)
-    !             if(write_greens_f) then
-    !                 call ezfio_set_spectral_density_greens_A_complex(greens_A_complex)
-    !             end if
-    !         end if 
-    !         if(spectral_density_calc_R) then
-    !             call ezfio_set_spectral_density_spectral_density_R_complex(spectral_density_R_complex)
-    !             if(write_greens_f) then
-    !                 call ezfio_set_spectral_density_greens_R_complex(greens_R_complex)
-    !             end if
-    !         end if
-    !     end if
-    ! else
-    !     allocate(psi_coef_read(N_det, N_states))
-    !     call ezfio_get_determinants_psi_coef(psi_coef_read)
-    !     psi_coef = psi_coef_read
-    !     deallocate(psi_coef_read)
-
-    !     force_reads = size(psi_coef, 1) == N_det_read .and.&
-    !     size(psi_det, 3)  == N_det_read
+        force_reads = size(psi_coef, 1) == N_det_read .and.&
+        size(psi_det, 3)  == N_det_read
         
-    !     if(force_reads) then
-    !         if(spectral_density_calc_A) then
-    !             call ezfio_set_spectral_density_spectral_density_A(spectral_density_A)
-    !             if(write_greens_f) then
-    !                 call ezfio_set_spectral_density_greens_A(greens_A)
-    !             end if
-    !         end if 
-    !         if(spectral_density_calc_R) then
-    !             call ezfio_set_spectral_density_spectral_density_R(spectral_density_R)
-    !             if(write_greens_f) then
-    !                 call ezfio_set_spectral_density_greens_R(greens_R)
-    !             end if
-    !         end if
-    !     end if
-    ! end if
+        if(force_reads) then
+            if(spectral_density_calc_A) then
+                call ezfio_set_spectral_density_spectral_density_A(spectral_density_A)
+                if(write_greens_f) then
+                    call ezfio_set_spectral_density_greens_A(greens_A)
+                end if
+            end if 
+            if(spectral_density_calc_R) then
+                call ezfio_set_spectral_density_spectral_density_R(spectral_density_R)
+                if(write_greens_f) then
+                    call ezfio_set_spectral_density_greens_R(greens_R)
+                end if
+            end if
+        end if
+    end if
     
 end
 
