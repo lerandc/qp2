@@ -24,17 +24,19 @@ BEGIN_PROVIDER [complex*16, greens_A, (greens_omega_N)]
     integer(bit_kind)       :: det_copy(N_int,2,N_det)
     complex*16              :: z(greens_omega_N), zalpha(lanczos_N), bbeta(lanczos_N), cfraction_c
     integer                 :: i, nnz, s_max_sze
-    integer, allocatable    :: H_c(:), H_p(:), t_H_c(:)
-    double precision , allocatable  ::  H_v(:), t_H_v(:)
+    integer, allocatable    :: H_c(:), t_H_c(:), H_p(:)
+    double precision , allocatable  ::  H_v(:), t_H_v(:), v(:)
 
 
-    s_max_sze = nnz_max_per_row
+    s_max_sze =1000*nnz_max_per_row
     ! prepare sparse Hamiltonian arrays
+    print *, '####### Forming sparse arrays'
     allocate(H_c(s_max_sze), H_v(s_max_sze), H_p(N_det+1))
     call form_sparse_dH(H_p, H_c, H_v, s_max_sze)
 
     nnz = H_p(N_det+1)-1
 
+    print *, '### Moving allocations'
     allocate(t_H_c(nnz), t_H_v(nnz))
     t_H_c = H_c(:nnz)
     t_H_v = H_v(:nnz)
@@ -44,15 +46,19 @@ BEGIN_PROVIDER [complex*16, greens_A, (greens_omega_N)]
 
     ! prepare input vector
     ! add electron to LUMO
+    print *, '####### Building excited wavefunction'
     call build_A_wavefunction(elec_alpha_num+1,1,psi_coef_excited,det_copy)
 
     norm = dnrm2(N_det, psi_coef_excited(:,1), 1)
     psi_coef_excited = psi_coef_excited / norm
 
+    print *, '####### Performing Lanczos tridiagonalization'
     call lanczos_tridiag_sparse_reortho_r(H_v, H_c, H_p, psi_coef_excited(:,1),&
                                    alpha, beta,&
                                    lanczos_N, nnz, N_det)
 
+    
+    print *, '####### Calculating Greens function'
     bbeta(1) = (1.0, 0.0)
     do i = 2, lanczos_N
         bbeta(i) = beta(i)**2.0
@@ -79,16 +85,19 @@ BEGIN_PROVIDER [complex*16, greens_R, (greens_omega_N)]
     double precision        :: psi_coef_excited(N_det, N_states), E0, norm, dnrm2
     integer(bit_kind)       :: det_copy(N_int,2,N_det)
     complex*16              :: z(greens_omega_N), zalpha(lanczos_N), bbeta(lanczos_N), cfraction_c
-    integer                 :: i, nnz
+    integer                 :: i, nnz, s_max_sze
     integer, allocatable    :: H_c(:), H_p(:), t_H_c(:)
     double precision , allocatable  ::  H_v(:), t_H_v(:)
 
+    s_max_sze =1000*nnz_max_per_row
     ! prepare sparse Hamiltonian arrays
-    allocate(H_c(nnz_max_per_row), H_v(nnz_max_per_row), H_p(N_det+1))
-    call form_sparse_dH(H_p, H_c, H_v, nnz_max_per_row)
+    print *, '####### Forming sparse arrays'
+    allocate(H_c(s_max_sze), H_v(s_max_sze), H_p(N_det+1))
+    call form_sparse_dH(H_p, H_c, H_v, s_max_sze)
 
     nnz = H_p(N_det+1)-1
 
+    print *, '### Moving allocations'
     allocate(t_H_c(nnz), t_H_v(nnz))
     t_H_c = H_c(:nnz)
     t_H_v = H_v(:nnz)
@@ -98,14 +107,18 @@ BEGIN_PROVIDER [complex*16, greens_R, (greens_omega_N)]
 
     ! prepare input vector
     ! remove electron from HOMO
+    print *, '####### Building excited wavefunction'
     call build_R_wavefunction(elec_alpha_num,1,psi_coef_excited,det_copy)
 
-    norm = sum(abs(psi_coef_excited)**2.0)
+    norm = dnrm2(N_det, psi_coef_excited(:,1), 1)
     psi_coef_excited = psi_coef_excited / norm
 
+    print *, '####### Performing Lanczos tridiagonalization'
     call lanczos_tridiag_sparse_reortho_r(H_v, H_c, H_p, psi_coef_excited(:,1),&
                                    alpha, beta,&
                                    lanczos_N, nnz, N_det)
+
+    print *, '####### Calculating Greens function'
     bbeta(1) = (1.0, 0.0)
     do i = 2, lanczos_N
         bbeta(i) = beta(i)**2.0
@@ -138,17 +151,20 @@ BEGIN_PROVIDER [complex*16, greens_A_complex, (greens_omega_N)]
     complex*16              :: psi_coef_excited(N_det, N_states) 
     integer(bit_kind)       :: det_copy(N_int,2,N_det)
     complex*16              :: z(greens_omega_N), zalpha(lanczos_N), bbeta(lanczos_N), cfraction_c
-    integer                 :: i, nnz
+    integer                 :: i, nnz, s_max_sze
     integer, allocatable    :: H_c(:), H_p(:), t_H_c(:)
     complex*16 , allocatable  ::  H_v(:), t_H_v(:)
 
 
+    s_max_sze =1000*nnz_max_per_row
     ! prepare sparse Hamiltonian arrays
-    allocate(H_c(5*nnz_max_per_row), H_v(5*nnz_max_per_row), H_p(N_det+1))
-    call form_sparse_zH(H_p, H_c, H_v, 5*nnz_max_per_row)
+    print *, '####### Forming sparse arrays'
+    allocate(H_c(s_max_sze), H_v(s_max_sze), H_p(N_det+1))
+    call form_sparse_zH(H_p, H_c, H_v, s_max_sze)
 
     nnz = H_p(N_det+1)-1
-
+    
+    print *, '### Moving allocations'
     allocate(t_H_c(nnz), t_H_v(nnz))
     t_H_c = H_c(:nnz)
     t_H_v = H_v(:nnz)
@@ -157,15 +173,18 @@ BEGIN_PROVIDER [complex*16, greens_A_complex, (greens_omega_N)]
 
     ! prepare input vector
     ! add electron to LUMO
+    print *, '####### Building excited wavefunction'
     call build_A_wavefunction_complex(elec_alpha_num+1,1,psi_coef_excited,det_copy)
 
     norm = dznrm2(N_det, psi_coef_excited(:,1), 1)
     psi_coef_excited = psi_coef_excited / norm
 
+    print *, '####### Performing Lanczos tridiagonalization'
     call lanczos_tridiag_sparse_reortho_c(H_v, H_c, H_p, psi_coef_excited(:,1),&
                                    alpha, beta,&
                                    lanczos_N, nnz, N_det)
 
+    print *, '####### Calculating Greens function'
     bbeta(1) = 1.0
     do i = 2, lanczos_N
         bbeta(i) = beta(i)**2.0
@@ -192,17 +211,19 @@ BEGIN_PROVIDER [complex*16, greens_R_complex, (greens_omega_N)]
     complex*16              :: psi_coef_excited(N_det, N_states) 
     integer(bit_kind)       :: det_copy(N_int,2,N_det)
     complex*16              :: z(greens_omega_N), zalpha(lanczos_N), bbeta(lanczos_N), cfraction_c
-    integer                 :: i, nnz
+    integer                 :: i, nnz, s_max_sze
     integer, allocatable    :: H_c(:), H_p(:), t_H_c(:)
     complex*16 , allocatable  ::  H_v(:), t_H_v(:)
 
-
+    s_max_sze =1000*nnz_max_per_row
     ! prepare sparse Hamiltonian arrays
-    allocate(H_c(5*nnz_max_per_row), H_v(5*nnz_max_per_row), H_p(N_det+1))
-    call form_sparse_zH(H_p, H_c, H_v, 5*nnz_max_per_row)
+    print *, '####### Forming sparse arrays'
+    allocate(H_c(s_max_sze), H_v(s_max_sze), H_p(N_det+1))
+    call form_sparse_zH(H_p, H_c, H_v, s_max_sze)
 
     nnz = H_p(N_det+1)-1
 
+    print *, '### Moving allocations'
     allocate(t_H_c(nnz), t_H_v(nnz))
     t_H_c = H_c(:nnz)
     t_H_v = H_v(:nnz)
@@ -212,15 +233,18 @@ BEGIN_PROVIDER [complex*16, greens_R_complex, (greens_omega_N)]
 
     ! prepare input vector
     ! remove electron from HOMO
+    print *, '####### Building excited wavefunction'
     call build_R_wavefunction_complex(elec_alpha_num,1,psi_coef_excited,det_copy)
 
     norm = dznrm2(N_det, psi_coef_excited(:,1), 1)
     psi_coef_excited = psi_coef_excited / norm
 
+    print *, '####### Performing Lanczos tridiagonalization'
     call lanczos_tridiag_sparse_reortho_c(H_v, H_c, H_p, psi_coef_excited(:,1),&
                                    alpha, beta,&
                                    lanczos_N, nnz, N_det)
 
+    print *, '####### Calculating Greens function'
     bbeta(1) = 1.0
     do i = 2, lanczos_N
         bbeta(i) = beta(i)**2.0

@@ -114,14 +114,14 @@ subroutine form_sparse_dH(csr_s, csr_c, csr_v, sze)
     integer, intent(out)          :: csr_s(N_det+1), csr_c(sze)
     double precision, intent(out) :: csr_v(sze)
 
-    integer              :: n, i, j, k, l_row
+    integer              :: n, i, j, k, l_row, old_row
     integer              :: nnz, nnz_cnt, nnz_tot
     integer              :: n_vals, n_vals_row, n_threads, ID
     integer              :: nnz_csr, ii, scn_a, kk
     integer :: OMP_get_num_threads, OMP_get_thread_num
-    integer, allocatable :: nnz_arr(:), coo_r(:), coo_c(:), k_arr(:), l_cols(:)
+    integer, allocatable :: nnz_arr(:), coo_r(:), coo_c(:), l_cols(:)
     integer, allocatable :: coo_r_all(:), coo_c_all(:), coo_r_t(:), coo_c_t(:)
-    integer, allocatable :: coo_s(:), coo_n(:)
+    integer             :: coo_s(N_det), coo_n(N_det), coo_c_n(N_det), coo_c_n_all(N_det)
 
     double precision     :: hij, frac
     double precision, allocatable :: coo_v(:), coo_v_t(:), coo_v_all(:)
@@ -130,8 +130,10 @@ subroutine form_sparse_dH(csr_s, csr_c, csr_v, sze)
     ! force provide early so that threads don't each try to provide
     call i_H_j(psi_det(:,:,1), psi_det(:,:,1), N_int, hij) 
     
-    !$OMP PARALLEL SHARED(nnz_tot, nnz_arr, n_threads, psi_det, N_det, N_int, nnz_max_per_row, n_vals_row)&
-    !$OMP PRIVATE(i,j,k, hij, nnz, nnz_cnt, ID, coo_r, coo_c, coo_v, coo_r_t, coo_c_t, coo_v_t, l_cols, l_row) 
+    !$OMP PARALLEL SHARED(nnz_tot, nnz_arr, nnz_csr, n_threads, psi_det, N_det, N_int, nnz_max_per_row, n_vals_row,&
+    !$OMP                 coo_r_all, coo_c_all, coo_v_all, csr_s, csr_c, csr_v, coo_s, coo_n, coo_c_n_all)& 
+    !$OMP PRIVATE(i,j,old_row, k,ii,kk, scn_a, ID, hij, nnz, nnz_cnt, coo_r, coo_c, coo_v, coo_r_t, coo_c_t, coo_v_t, coo_c_n, l_cols, l_row) 
+
     !$ n_threads = OMP_get_num_threads()
     !$ ID = OMP_get_thread_num() + 1
     frac = 0.2
@@ -142,17 +144,18 @@ subroutine form_sparse_dH(csr_s, csr_c, csr_v, sze)
     allocate(coo_c(n_vals))
     allocate(coo_v(n_vals))
     allocate(l_cols(n_vals_row))
-
+    
     !$OMP SINGLE
     allocate(nnz_arr(n_threads))
     nnz_tot = 0
     !$OMP END SINGLE
-
+    
     !$OMP SINGLE
-    print *, "## Pre-sparse columns"
+    print *, "## Calculating nonzero entries"
     !$OMP END SINGLE
-    !$OMP BARRIER
-
+    
+    coo_c_n = 0
+    coo_c_n_all = 0
     nnz_cnt = 0
     !$OMP DO SCHEDULE(GUIDED)
     do i = 1, N_det
@@ -177,6 +180,8 @@ subroutine form_sparse_dH(csr_s, csr_c, csr_v, sze)
         
         ! first column is the row of the determinants
         l_row = l_cols(1)
+
+        coo_n(l_row) = nnz + 1 ! store for later
         do j = 1, nnz+1
             nnz_cnt += 1
             call i_H_j(psi_det(:,:,l_row),&
@@ -185,6 +190,7 @@ subroutine form_sparse_dH(csr_s, csr_c, csr_v, sze)
             coo_r(nnz_cnt) = l_row
             coo_c(nnz_cnt) = l_cols(j)
             coo_v(nnz_cnt) = hij
+            coo_c_n(l_cols(j)) += 1
         end do
     end do
     !$OMP END DO
@@ -193,14 +199,9 @@ subroutine form_sparse_dH(csr_s, csr_c, csr_v, sze)
 
     !$OMP CRITICAl
     nnz_tot = nnz_tot + nnz_cnt
+    coo_c_n_all = coo_c_n_all + coo_c_n
     !$OMP END CRITICAl
     !$OMP BARRIER
-
-    !$OMP SINGLE
-    print *, "## Post-sparse columns"
-    !$OMP END SINGLE
-    !$OMP BARRIER
-    
 
     !$OMP SINGLE
     allocate(coo_r_all(nnz_tot))
@@ -216,63 +217,41 @@ subroutine form_sparse_dH(csr_s, csr_c, csr_v, sze)
     coo_r_all(k+1:k+nnz_arr(ID)) = coo_r
     coo_c_all(k+1:k+nnz_arr(ID)) = coo_c
     coo_v_all(k+1:k+nnz_arr(ID)) = coo_v
-    !$OMP END PARALLEL
+
+    !$OMP BARRIER
+
 
     !TODO: at this point, you should check that sze >= nnz_csr
-    print *, "nnz_csr: ", 2*nnz_tot-N_det, " max sze:", sze
-    
-    ! convert to sparse matrix in CSR format
-    !$OMP PARALLEL SHARED(N_det, nnz_csr, coo_r_all, coo_c_all, coo_v_all, csr_s, csr_c, csr_v, coo_s, coo_n, k_arr, n_threads)&
-    !$OMP PRIVATE(i,j,ii, scn_a, ID)
-    !$ n_threads = OMP_get_num_threads()
-    !$ ID = OMP_get_thread_num() + 1
-
     nnz_csr = 2*nnz_tot-N_det! COO was taken from upper triangle, account for double counting of diagonal
-
     !$OMP SINGLE
-    allocate(coo_s(N_det), coo_n(N_det))
+    print *, "Total non-zero entries: ", nnz_csr, " max size:", sze
+    print *, "## Constructing pointer arrays"
     !$OMP END SINGLE
-
-    !$OMP SINGLE
-    print *, "## COO pointers"
-    !$OMP END SINGLE
-    !$OMP BARRIER
+    
 
     ! calculate the starting index of each row in COO, since they were not sorted
 
-    ! this requires a lot of looping over the arrays
-    ! the better way to do this is to split the entries of coo_r_all over 
-    ! NUM_THREADS; each thread scans over a section of array; records start in coo_s;
-    ! records stop in coo_n; coo_n = coo_n - coo_s + 1
-    ! probably could simultaneously count columns, which are needed for CSR pointers
-    !$OMP DO SCHEDULE(GUIDED)
-    do i = 1, N_det
-        j = 1
-        do while(coo_r_all(j) .ne. i)
-            j += 1
-        end do
-        coo_s(i) = j
-        
-        k = 0
-        do while(coo_r_all(j) ==  i)
-            k +=1
-            j += 1
-        end do
+    ! iterate over range, keep track of current row; if row changes, record the row start
+    ii = (nnz_tot / n_threads)*(ID-1) + 1 ! start of range
+    kk = (nnz_tot / n_threads) * ID + 3 ! end of range, slight overlap to catch boundary pointers
+    if (ID == n_threads) kk = nnz_tot
+    old_row = coo_r_all(ii)
 
-        coo_n(i) = k
+    do i = ii, kk 
+        if(coo_r_all(i) .ne. old_row) then 
+            coo_s(coo_r_all(i)) = i
+            old_row = coo_r_all(i)
+        end if 
     end do
-    !$OMP END DO
+
+    !$OMP SINGLE
+    coo_s(coo_r_all(1)) = 1
+    !$OMP END SINGLE
 
     ! calculate CSR pointer ranges
     ! row i data goes from csr_s(i) to csr_s(i+1) - 1
     ! first, count all entries in parallel, then perform scan to set pointer ranges
     ! then reduce with inclsuive scan
-
-    !$OMP SINGLE
-    print *, "## Pre csr pointers"
-    !$OMP END SINGLE
-    !$OMP BARRIER
-    
 
     !$OMP SINGLE
     csr_s(1) = 1
@@ -281,11 +260,7 @@ subroutine form_sparse_dH(csr_s, csr_c, csr_v, sze)
     
     !$OMP DO SCHEDULE(GUIDED) 
     do i = 2, N_det+1
-        k = 0 ! count all entries with column i-1
-        do j = 1, nnz_tot
-            k = k + merge(1,0,coo_c_all(j)==i-1)
-        end do
-        csr_s(i) = coo_n(i-1) + k - 1 ! account for double counting
+        csr_s(i) = coo_n(i-1) + coo_c_n_all(i-1) - 1 ! account for double counting
     end do
     !$OMP END DO
 
@@ -303,10 +278,9 @@ subroutine form_sparse_dH(csr_s, csr_c, csr_v, sze)
     !$OMP BARRIER
 
     !$OMP SINGLE
-    print *, "## Pre csr construction"
+    print *, "## Constructing CSR arrays"
     !$OMP END SINGLE
-    !$OMP BARRIER
-    
+
     ! loop through rows and construct CSR matrix
     !$OMP DO SCHEDULE(GUIDED)
     do i = 1, N_det
@@ -332,12 +306,6 @@ subroutine form_sparse_dH(csr_s, csr_c, csr_v, sze)
         end do
     end do
     !$OMP END DO
-
-    !$OMP SINGLE
-    print *, "## Post csr construction"
-    !$OMP END SINGLE
-    !$OMP BARRIER
-
     !$OMP END PARALLEL
 
 end
@@ -353,16 +321,16 @@ subroutine form_sparse_zH(csr_s, csr_c, csr_v, sze)
 
     integer, intent(in)           :: sze
     integer, intent(out)          :: csr_s(N_det+1), csr_c(sze)
-    complex*16, intent(out)       :: csr_v(sze)
+    complex*16, intent(out) :: csr_v(sze)
 
-    integer              :: n, i, j, k, l_row
+    integer              :: n, i, j, k, l_row, old_row
     integer              :: nnz, nnz_cnt, nnz_tot
     integer              :: n_vals, n_vals_row, n_threads, ID
     integer              :: nnz_csr, ii, scn_a, kk
     integer :: OMP_get_num_threads, OMP_get_thread_num
-    integer, allocatable :: nnz_arr(:), coo_r(:), coo_c(:), k_arr(:), l_cols(:)
+    integer, allocatable :: nnz_arr(:), coo_r(:), coo_c(:), l_cols(:)
     integer, allocatable :: coo_r_all(:), coo_c_all(:), coo_r_t(:), coo_c_t(:)
-    integer, allocatable :: coo_s(:), coo_n(:)
+    integer             :: coo_s(N_det), coo_n(N_det), coo_c_n(N_det), coo_c_n_all(N_det)
 
     double precision     :: frac
     complex*16           :: hij
@@ -370,26 +338,34 @@ subroutine form_sparse_zH(csr_s, csr_c, csr_v, sze)
     
 
     ! force provide early so that threads don't each try to provide
-    call i_h_j_complex(psi_det(:,:,1), psi_det(:,:,1), N_int, hij) 
+    call i_H_j(psi_det(:,:,1), psi_det(:,:,1), N_int, hij) 
     
-    !$OMP PARALLEL SHARED(nnz_tot, nnz_arr, n_threads, psi_det, N_det, N_int, nnz_max_per_row, n_vals_row)&
-    !$OMP PRIVATE(i,j,k, hij, nnz, nnz_cnt, ID, coo_r, coo_c, coo_v, coo_r_t, coo_c_t, coo_v_t, l_cols, l_row) 
+    !$OMP PARALLEL SHARED(nnz_tot, nnz_arr, nnz_csr, n_threads, psi_det, N_det, N_int, nnz_max_per_row, n_vals_row,&
+    !$OMP                 coo_r_all, coo_c_all, coo_v_all, csr_s, csr_c, csr_v, coo_s, coo_n, coo_c_n_all)& 
+    !$OMP PRIVATE(i,j,old_row, k,ii,kk, scn_a, ID, hij, nnz, nnz_cnt, coo_r, coo_c, coo_v, coo_r_t, coo_c_t, coo_v_t, coo_c_n, l_cols, l_row) 
+
     !$ n_threads = OMP_get_num_threads()
     !$ ID = OMP_get_thread_num() + 1
     frac = 0.2
     n_vals = max(nint(N_det*N_det*frac/n_threads), 128)
-    n_vals_row = 10*ceiling(sqrt(real(nnz_max_per_row)))
+    n_vals_row = nnz_max_per_row
 
     allocate(coo_r(n_vals))
     allocate(coo_c(n_vals))
     allocate(coo_v(n_vals))
     allocate(l_cols(n_vals_row))
-
+    
     !$OMP SINGLE
     allocate(nnz_arr(n_threads))
     nnz_tot = 0
     !$OMP END SINGLE
-
+    
+    !$OMP SINGLE
+    print *, "## Calculating nonzero entries"
+    !$OMP END SINGLE
+    
+    coo_c_n = 0
+    coo_c_n_all = 0
     nnz_cnt = 0
     !$OMP DO SCHEDULE(GUIDED)
     do i = 1, N_det
@@ -414,6 +390,8 @@ subroutine form_sparse_zH(csr_s, csr_c, csr_v, sze)
         
         ! first column is the row of the determinants
         l_row = l_cols(1)
+
+        coo_n(l_row) = nnz + 1 ! store for later
         do j = 1, nnz+1
             nnz_cnt += 1
             call i_h_j_complex(psi_det(:,:,l_row),&
@@ -422,6 +400,7 @@ subroutine form_sparse_zH(csr_s, csr_c, csr_v, sze)
             coo_r(nnz_cnt) = l_row
             coo_c(nnz_cnt) = l_cols(j)
             coo_v(nnz_cnt) = hij
+            coo_c_n(l_cols(j)) += 1
         end do
     end do
     !$OMP END DO
@@ -430,6 +409,7 @@ subroutine form_sparse_zH(csr_s, csr_c, csr_v, sze)
 
     !$OMP CRITICAl
     nnz_tot = nnz_tot + nnz_cnt
+    coo_c_n_all = coo_c_n_all + coo_c_n
     !$OMP END CRITICAl
     !$OMP BARRIER
 
@@ -444,44 +424,39 @@ subroutine form_sparse_zH(csr_s, csr_c, csr_v, sze)
         k += nnz_arr(i)
     end do
 
-    do i = k+1, k + nnz_arr(ID)
-        coo_r_all(i) = coo_r(i-k)
-        coo_c_all(i) = coo_c(i-k)
-        coo_v_all(i) = coo_v(i-k)
-    end do
-    !$OMP END PARALLEL
+    coo_r_all(k+1:k+nnz_arr(ID)) = coo_r
+    coo_c_all(k+1:k+nnz_arr(ID)) = coo_c
+    coo_v_all(k+1:k+nnz_arr(ID)) = coo_v
 
-    
-    ! convert to sparse matrix in CSR format
-    !$OMP PARALLEL SHARED(N_det, nnz_csr, coo_r_all, coo_c_all, coo_v_all, csr_s, csr_c, csr_v, coo_s, coo_n, k_arr, n_threads)&
-    !$OMP PRIVATE(i,j,ii, scn_a, ID)
-    !$ n_threads = OMP_get_num_threads()
-    !$ ID = OMP_get_thread_num() + 1
+    !$OMP BARRIER
 
+
+    !TODO: at this point, you should check that sze >= nnz_csr
     nnz_csr = 2*nnz_tot-N_det! COO was taken from upper triangle, account for double counting of diagonal
-
     !$OMP SINGLE
-    allocate(coo_s(N_det), coo_n(N_det))
+    print *, "Total non-zero entries: ", nnz_csr, " max size:", sze
+    print *, "## Constructing pointer arrays"
     !$OMP END SINGLE
+    
 
     ! calculate the starting index of each row in COO, since they were not sorted
-    !$OMP DO SCHEDULE(GUIDED)
-    do i = 1, N_det
-        j = 1
-        do while(coo_r_all(j) .ne. i)
-            j += 1
-        end do
-        coo_s(i) = j
-        
-        k = 0
-        do while(coo_r_all(j) ==  i)
-            k +=1
-            j += 1
-        end do
 
-        coo_n(i) = k
+    ! iterate over range, keep track of current row; if row changes, record the row start
+    ii = (nnz_tot / n_threads)*(ID-1) + 1 ! start of range
+    kk = (nnz_tot / n_threads) * ID + 3 ! end of range, slight overlap to catch boundary pointers
+    if (ID == n_threads) kk = nnz_tot
+    old_row = coo_r_all(ii)
+
+    do i = ii, kk 
+        if(coo_r_all(i) .ne. old_row) then 
+            coo_s(coo_r_all(i)) = i
+            old_row = coo_r_all(i)
+        end if 
     end do
-    !$OMP END DO
+
+    !$OMP SINGLE
+    coo_s(coo_r_all(1)) = 1
+    !$OMP END SINGLE
 
     ! calculate CSR pointer ranges
     ! row i data goes from csr_s(i) to csr_s(i+1) - 1
@@ -495,11 +470,7 @@ subroutine form_sparse_zH(csr_s, csr_c, csr_v, sze)
     
     !$OMP DO SCHEDULE(GUIDED) 
     do i = 2, N_det+1
-        k = 0 ! count all entries with column i-1
-        do j = 1, nnz_tot
-            k = k + merge(1,0,coo_c_all(j)==i-1)
-        end do
-        csr_s(i) = coo_n(i-1) + k - 1 ! account for double counting
+        csr_s(i) = coo_n(i-1) + coo_c_n_all(i-1) - 1 ! account for double counting
     end do
     !$OMP END DO
 
@@ -516,6 +487,10 @@ subroutine form_sparse_zH(csr_s, csr_c, csr_v, sze)
     !$OMP END SINGLE
     !$OMP BARRIER
 
+    !$OMP SINGLE
+    print *, "## Constructing CSR arrays"
+    !$OMP END SINGLE
+
     ! loop through rows and construct CSR matrix
     !$OMP DO SCHEDULE(GUIDED)
     do i = 1, N_det
@@ -525,15 +500,15 @@ subroutine form_sparse_zH(csr_s, csr_c, csr_v, sze)
             ! search jth row for column i
             do ii = coo_s(j)+1, coo_s(j) + coo_n(j) -1
                 if (coo_c_all(ii) == i) then
-                    csr_v(csr_s(i) + k) = dconjg(coo_v_all(ii))  !! this is the only significant part different from real valued Hamiltonian code
+                    csr_v(csr_s(i) + k) = dconjg(coo_v_all(ii)) !! this is the only significant part different from real valued Hamiltonian code
                     csr_c(csr_s(i) + k) = j !coo_c_all(ii)
                     k += 1
                     exit
                 end if
             end do
-        ! get diagonal+ entries
         end do
         
+        ! get diagonal+ entries
         do ii = coo_s(i), coo_s(i) + coo_n(i) - 1
             csr_v(csr_s(i) + k) = coo_v_all(ii)
             csr_c(csr_s(i) + k) = coo_c_all(ii)
@@ -565,7 +540,7 @@ subroutine get_sparse_columns(k_a, columns, nnz, nnz_max)
     integer(bit_kind), allocatable    :: buffer(:,:)
     integer, allocatable              :: singles_a(:), singles_b(:)
     integer, allocatable              :: doubles_aa(:), doubles_bb(:), doubles_ab(:)
-    integer, allocatable              :: idx(:), idx_b_all(:), all_idx(:), srt_idx(:)
+    integer, allocatable              :: idx(:), all_idx(:), srt_idx(:)
     
     allocate(buffer(N_int, N_det), idx(N_det))
 
@@ -732,15 +707,15 @@ subroutine get_sparse_columns(k_a, columns, nnz, nnz_max)
 
     call insertion_isort(all_idx, srt_idx, n_off_diagonal+1)
 
-    deallocate(buffer, idx, singles_a, doubles_aa,&
-                singles_b, doubles_bb, doubles_ab,&
-                srt_idx)
-
+    
     ! print *, '------------------------'
     ! write(*, '(I12, I12, I12, I12)'),k_a, kidx, n_off_diagonal, nnz_max 
     ! print *, '--------'
-
+    
     columns(:n_off_diagonal+1) = all_idx
     nnz = n_off_diagonal
-
+    
+    deallocate(buffer, idx, singles_a, doubles_aa,&
+                singles_b, doubles_bb, doubles_ab,&
+                srt_idx, all_idx)
 end
