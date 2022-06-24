@@ -35,3 +35,6 @@ then
   ./configure --help
 
 fi
+
+export PATH=$QP_ROOT/external/ocaml-bundle/bootstrap/bin/:$PATH
+export ARCHIVE="ar cr"
