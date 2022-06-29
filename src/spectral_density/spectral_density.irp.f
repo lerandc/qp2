@@ -70,7 +70,7 @@ program spectral_density
     
 end
 
-BEGIN_PROVIDER [double precision, spectral_density_A, (greens_omega_N)]
+BEGIN_PROVIDER [double precision, spectral_density_A, (greens_omega_N, n_iorb_A)]
     implicit none
 
     double precision :: pi
@@ -80,7 +80,7 @@ BEGIN_PROVIDER [double precision, spectral_density_A, (greens_omega_N)]
 
 END_PROVIDER
 
-BEGIN_PROVIDER [double precision, spectral_density_R, (greens_omega_N)]
+BEGIN_PROVIDER [double precision, spectral_density_R, (greens_omega_N, n_iorb_R)]
     implicit none
 
     double precision :: pi
@@ -90,7 +90,7 @@ BEGIN_PROVIDER [double precision, spectral_density_R, (greens_omega_N)]
 
 END_PROVIDER
 
-BEGIN_PROVIDER [double precision, spectral_density_A_complex, (greens_omega_N)]
+BEGIN_PROVIDER [double precision, spectral_density_A_complex, (greens_omega_N, n_iorb_A)]
     implicit none
 
     double precision :: pi
@@ -100,7 +100,7 @@ BEGIN_PROVIDER [double precision, spectral_density_A_complex, (greens_omega_N)]
 
 END_PROVIDER
 
-BEGIN_PROVIDER [double precision, spectral_density_R_complex, (greens_omega_N)]
+BEGIN_PROVIDER [double precision, spectral_density_R_complex, (greens_omega_N, n_iorb_R)]
     implicit none
 
     double precision :: pi

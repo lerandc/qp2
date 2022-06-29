@@ -101,7 +101,7 @@ subroutine sparse_csr_zmv(A_v, A_c, A_p, x, y, sze, nnz)
     !$OMP END PARALLEL DO
 end
 
-subroutine form_sparse_dH(csr_s, csr_c, csr_v, sze)
+subroutine form_sparse_dH(csr_s, csr_c, csr_v, sze, dets, iorb, ispin, ac_type)
     ! use MKL_SPBLAS
 
     implicit none
@@ -110,8 +110,10 @@ subroutine form_sparse_dH(csr_s, csr_c, csr_v, sze)
     ! in the space of the determinants
     END_DOC
 
-    integer, intent(in)           :: sze
+    integer, intent(in)           :: sze, iorb, ispin
+    integer(bit_kind), intent(in) :: dets(N_int, 2, N_det)
     integer, intent(out)          :: csr_s(N_det+1), csr_c(sze)
+    logical, intent(in)           :: ac_type
     double precision, intent(out) :: csr_v(sze)
 
     integer              :: n, i, j, k, l_row, old_row
@@ -126,11 +128,13 @@ subroutine form_sparse_dH(csr_s, csr_c, csr_v, sze)
     double precision     :: hij, frac
     double precision, allocatable :: coo_v(:), coo_v_t(:), coo_v_all(:)
     
-
+    print *, "Nuclear repulsion energy: ", nuclear_repulsion
     ! force provide early so that threads don't each try to provide
-    call i_H_j(psi_det(:,:,1), psi_det(:,:,1), N_int, hij) 
+    call i_H_j(dets(:,:,1), dets(:,:,1), N_int, hij) 
+
+    coo_n = 0
     
-    !$OMP PARALLEL SHARED(nnz_tot, nnz_arr, nnz_csr, n_threads, psi_det, N_det, N_int, nnz_max_per_row, n_vals_row,&
+    !$OMP PARALLEL SHARED(nuclear_repulsion, nnz_tot, nnz_arr, nnz_csr, n_threads, dets, psi_det, N_det, N_int, nnz_max_per_row, n_vals_row,&
     !$OMP                 coo_r_all, coo_c_all, coo_v_all, csr_s, csr_c, csr_v, coo_s, coo_n, coo_c_n_all)& 
     !$OMP PRIVATE(i,j,old_row, k,ii,kk, scn_a, ID, hij, nnz, nnz_cnt, coo_r, coo_c, coo_v, coo_r_t, coo_c_t, coo_v_t, coo_c_n, l_cols, l_row) 
 
@@ -161,10 +165,13 @@ subroutine form_sparse_dH(csr_s, csr_c, csr_v, sze)
     do i = 1, N_det
         nnz = 0
         l_cols = 0
-        call get_sparse_columns(i, l_cols, nnz, n_vals_row)
+        call get_sparse_columns(i, l_cols, nnz, n_vals_row,&
+                                 iorb, ispin, ac_type)
+
+        if (nnz == 0) cycle
 
         ! reallocate arrays if necessary
-        if (nnz_cnt + nnz + 1 > size(coo_r, 1)) then
+        if (nnz_cnt + nnz > size(coo_r, 1)) then
             allocate(coo_r_t(nnz_cnt + 10*nnz))
             allocate(coo_c_t(nnz_cnt + 10*nnz))
             allocate(coo_v_t(nnz_cnt + 10*nnz))
@@ -180,18 +187,37 @@ subroutine form_sparse_dH(csr_s, csr_c, csr_v, sze)
         
         ! first column is the row of the determinants
         l_row = l_cols(1)
+        coo_n(l_row) = nnz ! store for later
+        ! diagonal component needs nuclear repulsion correction
+        nnz_cnt +=1
 
-        coo_n(l_row) = nnz + 1 ! store for later
-        do j = 1, nnz+1
+        ! $OMP CRITICAL
+        ! print *, l_row, l_row
+        ! print *, "Original det:"
+        ! call print_det(psi_det(:,:,l_row), N_int)
+        ! print *, "Excited det:"
+        ! call print_det(dets(:,:,l_row), N_int)
+        call i_H_j(dets(:,:,l_row), dets(:,:,l_row), N_int, hij)
+        
+        coo_r(nnz_cnt) = l_row
+        coo_c(nnz_cnt) = l_row
+        coo_v(nnz_cnt) = hij ! + nuclear_repulsion
+        coo_c_n(l_row) += 1
+        
+        do j = 2, nnz
             nnz_cnt += 1
-            call i_H_j(psi_det(:,:,l_row),&
-            psi_det(:,:,l_cols(j)), N_int, hij)
+            ! print *, l_row, l_cols(j)
+            ! call print_det(dets(:,:,l_cols(j)), N_int)
+
+            call i_H_j(dets(:,:,l_row),&
+            dets(:,:,l_cols(j)), N_int, hij)
             
             coo_r(nnz_cnt) = l_row
             coo_c(nnz_cnt) = l_cols(j)
             coo_v(nnz_cnt) = hij
             coo_c_n(l_cols(j)) += 1
         end do
+        ! $OMP END CRITICAL
     end do
     !$OMP END DO
 
@@ -261,9 +287,10 @@ subroutine form_sparse_dH(csr_s, csr_c, csr_v, sze)
     !$OMP DO SCHEDULE(GUIDED) 
     do i = 2, N_det+1
         csr_s(i) = coo_n(i-1) + coo_c_n_all(i-1) - 1 ! account for double counting
+        if(csr_s(i) == -1) csr_s(i) = 0
     end do
     !$OMP END DO
-
+    
     ! need to strongly enforce synchronization here
     !$OMP BARRIER
     !$OMP SINGLE
@@ -520,14 +547,16 @@ subroutine form_sparse_zH(csr_s, csr_c, csr_v, sze)
 
 end
 
-subroutine get_sparse_columns(k_a, columns, nnz, nnz_max)
+subroutine get_sparse_columns(k_a, columns, nnz, nnz_max, iorb, ispin, ac_type)
     ! this whole function should be within a parallel loop over N_det
     ! the final output is the list of indices of off diagonal terms, sorted by column
     ! for the thread in the mainloop to calculate the (non-zero) matrix elements H_i, j>i
     ! for the hamiltonian in the space of the set of determinants
+    ! ac_type == F if adding electron, T if removing
     implicit none
 
-    integer, intent(in)      :: k_a, nnz_max
+    integer, intent(in)      :: k_a, nnz_max, iorb, ispin
+    logical, intent(in)      :: ac_type
     integer, intent(out)     :: nnz, columns(nnz_max)
     integer :: i, j, k, k_b
     integer :: krow, kcol, lrow, lcol
@@ -535,6 +564,7 @@ subroutine get_sparse_columns(k_a, columns, nnz, nnz_max)
     integer :: n_singles_a, n_singles_b, n_doubles_aa, n_doubles_bb, n_doubles_ab
     integer :: n_buffer_old, n_doubles_ab_tot
     integer :: n_off_diagonal, n_offset, tdegree
+    logical :: is_filled
 
     integer(bit_kind) :: ref_det(N_int, 2), tmp_det(N_int, 2), tmp_det2(N_int, 2), sdet_a(N_int), sdet_b(N_int)
     integer(bit_kind), allocatable    :: buffer(:,:)
@@ -555,8 +585,10 @@ subroutine get_sparse_columns(k_a, columns, nnz, nnz_max)
     kcol = psi_bilinear_matrix_columns(k_a)
     ref_det(:,1) = psi_det_alpha_unique(:, krow)
     ref_det(:,2) = psi_det_beta_unique (:, kcol)
-    
 
+    call orb_is_filled(ref_det, iorb, ispin, N_int, is_filled)
+    if (is_filled .neqv. ac_type) return 
+    
     ! print *, "--------------------------------"
     ! write(*, "(A8, I10, A8, I10)"), "Iter: ", k_a, " Row: ", kidx
     ! print *, "Getting alpha singles/doubles"
@@ -573,6 +605,10 @@ subroutine get_sparse_columns(k_a, columns, nnz, nnz_max)
         
         tmp_det(:,1) = psi_det_alpha_unique(:, lrow)
         tmp_det(:,2) = psi_det_beta_unique (:, lcol)
+
+        call orb_is_filled(tmp_det, iorb, ispin, N_int, is_filled)
+
+        if (is_filled .neqv. ac_type) cycle 
         
         ! add determinant to buffer
         ! buffer is list of alpha spin determinants
@@ -609,6 +645,10 @@ subroutine get_sparse_columns(k_a, columns, nnz, nnz_max)
         
         tmp_det(:,1) = psi_det_alpha_unique(:, lrow)
         tmp_det(:,2) = psi_det_beta_unique (:, lcol)
+
+        call orb_is_filled(tmp_det, iorb, ispin, N_int, is_filled)
+
+        if (is_filled .neqv. ac_type) cycle 
                 
         ! add determinant to buffer
         ! buffer is list of beta spin determinants
@@ -662,6 +702,10 @@ subroutine get_sparse_columns(k_a, columns, nnz, nnz_max)
             tmp_det(:,1) = psi_det_alpha_unique(:, lrow)
             tmp_det(:,2) = psi_det_beta_unique (:, lcol)
 
+            call orb_is_filled(tmp_det, iorb, ispin, N_int, is_filled)
+
+            if (is_filled .neqv. ac_type) cycle 
+
             ! add determinant to buffer
             ! buffer is list of alpha spin determinants
             n_buffer += 1
@@ -713,9 +757,36 @@ subroutine get_sparse_columns(k_a, columns, nnz, nnz_max)
     ! print *, '--------'
     
     columns(:n_off_diagonal+1) = all_idx
-    nnz = n_off_diagonal
+    nnz = n_off_diagonal + 1
     
     deallocate(buffer, idx, singles_a, doubles_aa,&
                 singles_b, doubles_bb, doubles_ab,&
                 srt_idx, all_idx)
 end
+
+subroutine orb_is_filled(key_ref,iorb,ispin,Nint,is_filled)
+    use bitmasks
+    implicit none
+    BEGIN_DOC
+    ! determine whether iorb, ispin is filled in key_ref
+    ! key_ref has alpha and beta parts
+    END_DOC
+    integer, intent(in)            :: iorb, ispin, Nint
+    integer(bit_kind), intent(in) :: key_ref(Nint,2)
+    logical, intent(out) :: is_filled
+    
+    integer                        :: k,l
+    
+    ASSERT (iorb > 0)
+    ASSERT (ispin > 0)
+    ASSERT (ispin < 3)
+    ASSERT (Nint > 0)
+    
+    ! k is index of the int where iorb is found
+    ! l is index of the bit where iorb is found
+    k = ishft(iorb-1,-bit_kind_shift)+1
+    ASSERT (k >0)
+    l = iorb - ishft(k-1,bit_kind_shift)-1
+    ASSERT (l >= 0)
+    is_filled = btest(key_ref(k,ispin),l)  
+  end
