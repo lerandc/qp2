@@ -23,7 +23,7 @@ BEGIN_PROVIDER [complex*16, greens_A, (greens_omega_N, n_iorb_A)]
     double precision        :: psi_coef_excited(N_det, N_states), E0, norm, dnrm2
     integer(bit_kind)       :: det_copy(N_int,2,N_det)
     complex*16              :: z(greens_omega_N), zalpha(lanczos_N), bbeta(lanczos_N), cfraction_c
-    integer                 :: i, iorb, nnz, s_max_sze
+    integer                 :: i, iorb, nnz, s_max_sze, l_cols(1000)
     integer, allocatable    :: H_c(:), t_H_c(:), H_p(:)
     double precision , allocatable  ::  H_v(:), t_H_v(:), v(:)
 
@@ -40,7 +40,7 @@ BEGIN_PROVIDER [complex*16, greens_A, (greens_omega_N, n_iorb_A)]
         call build_A_wavefunction(iorb_A(iorb),1,psi_coef_excited,det_copy)
         norm = dnrm2(N_det, psi_coef_excited(:,1), 1)
         psi_coef_excited = psi_coef_excited / norm
-        
+
         ! prepare sparse Hamiltonian arrays
         print *, "Nuclear repulsion energy: ", nuclear_repulsion
         print *, '####### Forming sparse arrays'

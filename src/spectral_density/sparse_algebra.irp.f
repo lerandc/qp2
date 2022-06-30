@@ -191,12 +191,6 @@ subroutine form_sparse_dH(csr_s, csr_c, csr_v, sze, dets, iorb, ispin, ac_type)
         ! diagonal component needs nuclear repulsion correction
         nnz_cnt +=1
 
-        ! $OMP CRITICAL
-        ! print *, l_row, l_row
-        ! print *, "Original det:"
-        ! call print_det(psi_det(:,:,l_row), N_int)
-        ! print *, "Excited det:"
-        ! call print_det(dets(:,:,l_row), N_int)
         call i_H_j(dets(:,:,l_row), dets(:,:,l_row), N_int, hij)
         
         coo_r(nnz_cnt) = l_row
@@ -206,8 +200,6 @@ subroutine form_sparse_dH(csr_s, csr_c, csr_v, sze, dets, iorb, ispin, ac_type)
         
         do j = 2, nnz
             nnz_cnt += 1
-            ! print *, l_row, l_cols(j)
-            ! call print_det(dets(:,:,l_cols(j)), N_int)
 
             call i_H_j(dets(:,:,l_row),&
             dets(:,:,l_cols(j)), N_int, hij)
@@ -217,7 +209,6 @@ subroutine form_sparse_dH(csr_s, csr_c, csr_v, sze, dets, iorb, ispin, ac_type)
             coo_v(nnz_cnt) = hij
             coo_c_n(l_cols(j)) += 1
         end do
-        ! $OMP END CRITICAL
     end do
     !$OMP END DO
 
@@ -589,9 +580,6 @@ subroutine get_sparse_columns(k_a, columns, nnz, nnz_max, iorb, ispin, ac_type)
     call orb_is_filled(ref_det, iorb, ispin, N_int, is_filled)
     if (is_filled .neqv. ac_type) return 
     
-    ! print *, "--------------------------------"
-    ! write(*, "(A8, I10, A8, I10)"), "Iter: ", k_a, " Row: ", kidx
-    ! print *, "Getting alpha singles/doubles"
     ! Finding (1,0) and (2,0) excitations
     ! loop over same beta different alpha
     n_buffer = 0
@@ -635,7 +623,7 @@ subroutine get_sparse_columns(k_a, columns, nnz, nnz_max, iorb, ispin, ac_type)
     ! loop over same alpha different beta
     n_buffer = 0
     do i = psi_bilinear_matrix_transp_rows_loc(krow), psi_bilinear_matrix_transp_rows_loc(krow+1)-1
-        tidx = psi_bilinear_matrix_order_transp_reverse(i)
+        tidx = psi_bilinear_matrix_transp_order(i)
         lidx = psi_bilinear_matrix_order(tidx)
 
         if (lidx <= kidx) cycle
@@ -751,11 +739,6 @@ subroutine get_sparse_columns(k_a, columns, nnz, nnz_max, iorb, ispin, ac_type)
 
     call insertion_isort(all_idx, srt_idx, n_off_diagonal+1)
 
-    
-    ! print *, '------------------------'
-    ! write(*, '(I12, I12, I12, I12)'),k_a, kidx, n_off_diagonal, nnz_max 
-    ! print *, '--------'
-    
     columns(:n_off_diagonal+1) = all_idx
     nnz = n_off_diagonal + 1
     
