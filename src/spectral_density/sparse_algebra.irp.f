@@ -101,7 +101,7 @@ subroutine sparse_csr_zmv(A_v, A_c, A_p, x, y, sze, nnz)
     !$OMP END PARALLEL DO
 end
 
-subroutine form_sparse_dH(csr_s, csr_c, csr_v, sze, dets, iorb, ispin, ac_type)
+subroutine form_sparse_dH(csr_s, csr_c, csr_v, sze, dets, iorb, ispin, ac_type, N_det_l)
     ! use MKL_SPBLAS
 
     implicit none
@@ -110,9 +110,9 @@ subroutine form_sparse_dH(csr_s, csr_c, csr_v, sze, dets, iorb, ispin, ac_type)
     ! in the space of the determinants
     END_DOC
 
-    integer, intent(in)           :: sze, iorb, ispin
-    integer(bit_kind), intent(in) :: dets(N_int, 2, N_det)
-    integer, intent(out)          :: csr_s(N_det+1), csr_c(sze)
+    integer, intent(in)           :: sze, iorb, ispin, N_det_l
+    integer(bit_kind), intent(in) :: dets(N_int, 2, N_det_l)
+    integer, intent(out)          :: csr_s(N_det_l+1), csr_c(sze)
     logical, intent(in)           :: ac_type
     double precision, intent(out) :: csr_v(sze)
 
@@ -123,7 +123,7 @@ subroutine form_sparse_dH(csr_s, csr_c, csr_v, sze, dets, iorb, ispin, ac_type)
     integer :: OMP_get_num_threads, OMP_get_thread_num
     integer, allocatable :: nnz_arr(:), coo_r(:), coo_c(:), l_cols(:)
     integer, allocatable :: coo_r_all(:), coo_c_all(:), coo_r_t(:), coo_c_t(:)
-    integer             :: coo_s(N_det), coo_n(N_det), coo_c_n(N_det), coo_c_n_all(N_det)
+    integer             :: coo_s(N_det_l), coo_n(N_det_l), coo_c_n(N_det_l), coo_c_n_all(N_det_l)
 
     double precision     :: hij, frac
     double precision, allocatable :: coo_v(:), coo_v_t(:), coo_v_all(:)
@@ -134,14 +134,14 @@ subroutine form_sparse_dH(csr_s, csr_c, csr_v, sze, dets, iorb, ispin, ac_type)
 
     coo_n = 0
     
-    !$OMP PARALLEL SHARED(nuclear_repulsion, nnz_tot, nnz_arr, nnz_csr, n_threads, dets, psi_det, N_det, N_int, nnz_max_per_row, n_vals_row,&
+    !$OMP PARALLEL SHARED(nuclear_repulsion, nnz_tot, nnz_arr, nnz_csr, n_threads, dets, psi_det, N_det, N_det_l, N_int, nnz_max_per_row, n_vals_row,&
     !$OMP                 coo_r_all, coo_c_all, coo_v_all, csr_s, csr_c, csr_v, coo_s, coo_n, coo_c_n_all)& 
     !$OMP PRIVATE(i,j,old_row, k,ii,kk, scn_a, ID, hij, nnz, nnz_cnt, coo_r, coo_c, coo_v, coo_r_t, coo_c_t, coo_v_t, coo_c_n, l_cols, l_row) 
 
     !$ n_threads = OMP_get_num_threads()
     !$ ID = OMP_get_thread_num() + 1
     frac = 0.2
-    n_vals = max(nint(N_det*N_det*frac/n_threads), 128)
+    n_vals = max(nint(N_det_l*N_det_l*frac/n_threads), 128)
     n_vals_row = nnz_max_per_row
 
     allocate(coo_r(n_vals))
@@ -162,11 +162,11 @@ subroutine form_sparse_dH(csr_s, csr_c, csr_v, sze, dets, iorb, ispin, ac_type)
     coo_c_n_all = 0
     nnz_cnt = 0
     !$OMP DO SCHEDULE(GUIDED)
-    do i = 1, N_det
+    do i = 1, N_det ! this loop needs to go over all the determinants, since this loop is not in determiant order but rather k_a order
         nnz = 0
         l_cols = 0
         call get_sparse_columns(i, l_cols, nnz, n_vals_row,&
-                                 iorb, ispin, ac_type)
+                                 iorb, ispin, ac_type, N_det_l)
 
         if (nnz == 0) cycle
 
@@ -195,7 +195,7 @@ subroutine form_sparse_dH(csr_s, csr_c, csr_v, sze, dets, iorb, ispin, ac_type)
         
         coo_r(nnz_cnt) = l_row
         coo_c(nnz_cnt) = l_row
-        coo_v(nnz_cnt) = hij ! + nuclear_repulsion
+        coo_v(nnz_cnt) = hij
         coo_c_n(l_row) += 1
         
         do j = 2, nnz
@@ -239,7 +239,7 @@ subroutine form_sparse_dH(csr_s, csr_c, csr_v, sze, dets, iorb, ispin, ac_type)
 
 
     !TODO: at this point, you should check that sze >= nnz_csr
-    nnz_csr = 2*nnz_tot-N_det! COO was taken from upper triangle, account for double counting of diagonal
+    nnz_csr = 2*nnz_tot-N_det_l! COO was taken from upper triangle, account for double counting of diagonal
     !$OMP SINGLE
     print *, "Total non-zero entries: ", nnz_csr, " max size:", sze
     print *, "## Constructing pointer arrays"
@@ -272,11 +272,11 @@ subroutine form_sparse_dH(csr_s, csr_c, csr_v, sze, dets, iorb, ispin, ac_type)
 
     !$OMP SINGLE
     csr_s(1) = 1
-    csr_s(N_det+1) = 1 
+    csr_s(N_det_l+1) = 1 
     !$OMP END SINGLE
     
     !$OMP DO SCHEDULE(GUIDED) 
-    do i = 2, N_det+1
+    do i = 2, N_det_l+1
         csr_s(i) = coo_n(i-1) + coo_c_n_all(i-1) - 1 ! account for double counting
         if(csr_s(i) == -1) csr_s(i) = 0
     end do
@@ -287,7 +287,7 @@ subroutine form_sparse_dH(csr_s, csr_c, csr_v, sze, dets, iorb, ispin, ac_type)
     !$OMP SINGLE
     scn_a = 0
     !$OMP SIMD REDUCTION(inscan, +:scn_a)
-    do i = 1, N_det+1
+    do i = 1, N_det_l+1
         scn_a = scn_a + csr_s(i)
         !$OMP SCAN INCLUSIVE(scn_a)
         csr_s(i) = scn_a
@@ -301,7 +301,7 @@ subroutine form_sparse_dH(csr_s, csr_c, csr_v, sze, dets, iorb, ispin, ac_type)
 
     ! loop through rows and construct CSR matrix
     !$OMP DO SCHEDULE(GUIDED)
-    do i = 1, N_det
+    do i = 1, N_det_l
         k = 0
         do j = 1, i-1
             ! get pre-diagonal entries
@@ -538,7 +538,7 @@ subroutine form_sparse_zH(csr_s, csr_c, csr_v, sze)
 
 end
 
-subroutine get_sparse_columns(k_a, columns, nnz, nnz_max, iorb, ispin, ac_type)
+subroutine get_sparse_columns(k_a, columns, nnz, nnz_max, iorb, ispin, ac_type, N_det_l)
     ! this whole function should be within a parallel loop over N_det
     ! the final output is the list of indices of off diagonal terms, sorted by column
     ! for the thread in the mainloop to calculate the (non-zero) matrix elements H_i, j>i
@@ -546,7 +546,7 @@ subroutine get_sparse_columns(k_a, columns, nnz, nnz_max, iorb, ispin, ac_type)
     ! ac_type == F if adding electron, T if removing
     implicit none
 
-    integer, intent(in)      :: k_a, nnz_max, iorb, ispin
+    integer, intent(in)      :: k_a, nnz_max, iorb, ispin, N_det_l
     logical, intent(in)      :: ac_type
     integer, intent(out)     :: nnz, columns(nnz_max)
     integer :: i, j, k, k_b
@@ -572,6 +572,9 @@ subroutine get_sparse_columns(k_a, columns, nnz, nnz_max, iorb, ispin, ac_type)
     n_doubles_bb = 0
     
     kidx = psi_bilinear_matrix_order(k_a)
+
+    if (kidx > N_det_l) return ! determinant not included in this subset
+
     krow = psi_bilinear_matrix_rows(k_a)
     kcol = psi_bilinear_matrix_columns(k_a)
     ref_det(:,1) = psi_det_alpha_unique(:, krow)
@@ -586,7 +589,7 @@ subroutine get_sparse_columns(k_a, columns, nnz, nnz_max, iorb, ispin, ac_type)
     do i = psi_bilinear_matrix_columns_loc(kcol), psi_bilinear_matrix_columns_loc(kcol+1)-1
         lidx = psi_bilinear_matrix_order(i)
         
-        if (lidx <= kidx) cycle
+        if ((lidx <= kidx) .or. (lidx > N_det_l)) cycle
 
         lcol = psi_bilinear_matrix_columns(i)
         lrow = psi_bilinear_matrix_rows(i)
@@ -626,7 +629,7 @@ subroutine get_sparse_columns(k_a, columns, nnz, nnz_max, iorb, ispin, ac_type)
         tidx = psi_bilinear_matrix_transp_order(i)
         lidx = psi_bilinear_matrix_order(tidx)
 
-        if (lidx <= kidx) cycle
+        if ((lidx <= kidx) .or. (lidx > N_det_l)) cycle
         
         lcol = psi_bilinear_matrix_transp_columns(i)
         lrow = psi_bilinear_matrix_transp_rows(i)
@@ -682,7 +685,7 @@ subroutine get_sparse_columns(k_a, columns, nnz, nnz_max, iorb, ispin, ac_type)
         do i = psi_bilinear_matrix_columns_loc(j), psi_bilinear_matrix_columns_loc(j+1)-1
             lidx = psi_bilinear_matrix_order(i)
 
-            if (lidx <= kidx) cycle
+            if ((lidx <= kidx) .or. (lidx > N_det_l)) cycle
 
             lcol = psi_bilinear_matrix_columns(i)
             lrow = psi_bilinear_matrix_rows(i)
