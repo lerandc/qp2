@@ -1,6 +1,7 @@
 BEGIN_PROVIDER [integer, greens_omega_N]
     implicit none
     greens_omega_N = ceiling((greens_omega_max - greens_omega_min)/ greens_omega_resolution) + 1
+    call ezfio_set_spectral_density_greens_omega_N(greens_omega_N)
 END_PROVIDER
 
 BEGIN_PROVIDER [double precision, greens_omega, (greens_omega_N)]
