@@ -284,6 +284,12 @@ subroutine form_sparse_dH(csr_s, csr_c, csr_v, sze, dets, iorb, ispin, ac_type, 
         csr_c(csr_s(i):csr_s(i+1)-1) = coo_c_all(coo_s(i):coo_s(i+1)-1)
     end do
     !$OMP END DO
+
+    deallocate(coo_r, coo_c, coo_v, l_cols)
+
+    !$OMP SINGLE
+    deallocate(coo_s, coo_n, nnz_arr, coo_r_all, coo_c_all, coo_v_all)
+    !$OMP END SINGLE
     !$OMP END PARALLEL
 
 end
