@@ -133,8 +133,6 @@ subroutine form_sparse_dH(csr_s, csr_c, csr_v, sze, dets, iorb, ispin, ac_type, 
     call i_H_j(dets(:,:,1), dets(:,:,1), N_int, hij) 
 
     
-    coo_n = 0
-    
     !$OMP PARALLEL SHARED(nuclear_repulsion, nnz_tot, nnz_arr, nnz_csr, n_threads, dets, psi_det, N_det, N_det_l, N_int, nnz_max_per_row, n_vals_row,&
     !$OMP                 coo_r_all, coo_c_all, coo_v_all, csr_s, csr_c, csr_v, coo_s, coo_n)& 
     !$OMP PRIVATE(i,j,old_row, k,ii,kk, scn_a, ID, hij, nnz, nnz_cnt, coo_r, coo_c, coo_v, coo_r_t, coo_c_t, coo_v_t, l_cols, l_row) 
@@ -144,6 +142,7 @@ subroutine form_sparse_dH(csr_s, csr_c, csr_v, sze, dets, iorb, ispin, ac_type, 
 
     !$OMP SINGLE
     allocate(coo_s(N_det_l), coo_n(N_det_l))
+    coo_n = 0
     !$OMP END SINGLE
     !$OMP BARRIER
 
