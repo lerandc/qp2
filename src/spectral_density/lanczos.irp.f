@@ -322,8 +322,8 @@ subroutine lanczos_tridiag_sparse_reortho_r(H_v, H_c, H_p, u0, alpha, beta, k, n
     integer, intent(in)             :: k, sze, nnz, H_c(nnz), H_p(sze+1)
     integer                         :: i, ii, j, incx, incy
     double precision, intent(in)    :: H_v(nnz), u0(sze)
-    double precision                :: z(sze), z_t(sze)! uu(sze,k)
-    double precision, allocatable   :: uu(:,:)
+    ! double precision                :: z(sze), z_t(sze)! uu(sze,k)
+    double precision, allocatable   :: uu(:,:), z(:), z_t(:)
     double precision, intent(out)   :: alpha(k), beta(k)
     double precision                :: ddot, coef
     double precision                :: dnrm2
@@ -331,7 +331,7 @@ subroutine lanczos_tridiag_sparse_reortho_r(H_v, H_c, H_p, u0, alpha, beta, k, n
     incx = 1 
     incy = 1
 
-    allocate(uu(sze,k))
+    allocate(uu(sze,k), z(sze))
 
     ! initialize vectors
     uu(:,1) = u0
@@ -339,7 +339,7 @@ subroutine lanczos_tridiag_sparse_reortho_r(H_v, H_c, H_p, u0, alpha, beta, k, n
     beta = 0.d0
     
     do i = 1, k
-        z = 0
+        z = 0.d0
         call sparse_csr_dmv(H_v, H_c, H_p, uu(:,i), z, sze, nnz)
         alpha(i) = ddot(sze, z, incx, uu(:,i), incy)
 
@@ -349,6 +349,7 @@ subroutine lanczos_tridiag_sparse_reortho_r(H_v, H_c, H_p, u0, alpha, beta, k, n
         
         do ii = 1, 2 ! repeat process twice
             !$OMP PARALLEL PRIVATE(j, z_t, coef) SHARED(sze, incx, incy, uu, z)
+            allocate(z_t(sze))
             z_t = 0.d0
             !$OMP DO SCHEDULE(GUIDED)
             do j = 1, i
@@ -360,7 +361,8 @@ subroutine lanczos_tridiag_sparse_reortho_r(H_v, H_c, H_p, u0, alpha, beta, k, n
             !$OMP CRITICAL
             z = z - z_t
             !$OMP END CRITICAL
-            !$OMP END PARALLEL            
+            deallocate(z_t)
+            !$OMP END PARALLEL
         enddo 
         
         beta(i+1) = dnrm2(sze, z, incx)
