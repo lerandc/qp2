@@ -123,8 +123,8 @@ subroutine form_sparse_dH(csr_s, csr_c, csr_v, sze, dets, iorb, ispin, ac_type, 
     integer :: OMP_get_num_threads, OMP_get_thread_num
     integer, allocatable :: nnz_arr(:), coo_r(:), coo_c(:), l_cols(:)
     integer, allocatable :: coo_r_all(:), coo_c_all(:), coo_r_t(:), coo_c_t(:)
-    integer             :: coo_s(N_det_l), coo_n(N_det_l), coo_c_n(N_det_l), coo_c_n_all(N_det_l)
-
+    ! integer             :: coo_s(N_det_l), coo_n(N_det_l), coo_c_n(N_det_l), coo_c_n_all(N_det_l)
+    integer, allocatable:: coo_s(:), coo_n(:)
     double precision     :: hij, frac
     double precision, allocatable :: coo_v(:), coo_v_t(:), coo_v_all(:)
     
@@ -132,14 +132,21 @@ subroutine form_sparse_dH(csr_s, csr_c, csr_v, sze, dets, iorb, ispin, ac_type, 
     ! force provide early so that threads don't each try to provide
     call i_H_j(dets(:,:,1), dets(:,:,1), N_int, hij) 
 
+    
     coo_n = 0
     
     !$OMP PARALLEL SHARED(nuclear_repulsion, nnz_tot, nnz_arr, nnz_csr, n_threads, dets, psi_det, N_det, N_det_l, N_int, nnz_max_per_row, n_vals_row,&
-    !$OMP                 coo_r_all, coo_c_all, coo_v_all, csr_s, csr_c, csr_v, coo_s, coo_n, coo_c_n_all)& 
-    !$OMP PRIVATE(i,j,old_row, k,ii,kk, scn_a, ID, hij, nnz, nnz_cnt, coo_r, coo_c, coo_v, coo_r_t, coo_c_t, coo_v_t, coo_c_n, l_cols, l_row) 
+    !$OMP                 coo_r_all, coo_c_all, coo_v_all, csr_s, csr_c, csr_v, coo_s, coo_n)& 
+    !$OMP PRIVATE(i,j,old_row, k,ii,kk, scn_a, ID, hij, nnz, nnz_cnt, coo_r, coo_c, coo_v, coo_r_t, coo_c_t, coo_v_t, l_cols, l_row) 
 
     !$ n_threads = OMP_get_num_threads()
     !$ ID = OMP_get_thread_num() + 1
+
+    !$OMP SINGLE
+    allocate(coo_s(N_det_l), coo_n(N_det_l))
+    !$OMP END SINGLE
+    !$OMP BARRIER
+
     frac = 0.2
     n_vals = max(nint(N_det_l*N_det_l*frac/n_threads), 128)
     n_vals_row = nnz_max_per_row
@@ -158,8 +165,6 @@ subroutine form_sparse_dH(csr_s, csr_c, csr_v, sze, dets, iorb, ispin, ac_type, 
     print *, "## Calculating nonzero entries"
     !$OMP END SINGLE
     
-    coo_c_n = 0
-    coo_c_n_all = 0
     nnz_cnt = 0
     !$OMP DO SCHEDULE(GUIDED)
     do i = 1, N_det ! this loop needs to go over all the determinants, since this loop is not in determiant order but rather k_a order
@@ -196,7 +201,6 @@ subroutine form_sparse_dH(csr_s, csr_c, csr_v, sze, dets, iorb, ispin, ac_type, 
             coo_r(nnz_cnt) = l_row
             coo_c(nnz_cnt) = l_cols(j)
             coo_v(nnz_cnt) = hij
-            coo_c_n(l_cols(j)) += 1
         end do
     end do
     !$OMP END DO
@@ -205,7 +209,6 @@ subroutine form_sparse_dH(csr_s, csr_c, csr_v, sze, dets, iorb, ispin, ac_type, 
 
     !$OMP CRITICAl
     nnz_tot = nnz_tot + nnz_cnt
-    coo_c_n_all = coo_c_n_all + coo_c_n
     !$OMP END CRITICAl
     !$OMP BARRIER
     
@@ -521,7 +524,7 @@ subroutine get_sparse_columns(k_a, columns, row, nnz, nnz_max, iorb, ispin, ac_t
     integer, allocatable              :: doubles_aa(:), doubles_bb(:), doubles_ab(:)
     integer, allocatable              :: idx(:), all_idx(:), srt_idx(:)
     
-    allocate(buffer(N_int, N_det), idx(N_det))
+    allocate(buffer(N_int, N_det_l), idx(N_det_l))
 
     n_singles_a = 0
     n_singles_b = 0
