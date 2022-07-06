@@ -134,19 +134,18 @@ subroutine lanczos_tridiag_sparse_reortho_c(H_v, H_c, H_p, u0, alpha, beta, k, n
     integer, intent(in)             :: k, sze, nnz, H_c(nnz), H_p(sze+1)
     integer                         :: i, ii, j, incx, incy
     complex*16, intent(in)          :: H_v(nnz), u0(sze)
-    complex*16                      :: z(sze), z_t(sze)
     complex*16                      :: zdotc
-    complex*16, allocatable         :: uu(:,:)
+    complex*16, allocatable         :: uu(:,:), z(:), z_t(:)
     double precision, intent(out)   :: beta(k), alpha(k)
     double precision                :: dznrm2, coef
     
-    allocate(uu(sze,k))
+    allocate(uu(sze,k), z(sze))
     incx = 1 
     incy = 1
 
     ! initialize vectors
     uu(:,1) = u0
-    alpha = (0.d0, 0.d0)
+    alpha = 0.d0
     beta = 0.d0
     
     do i = 1, k
@@ -160,6 +159,7 @@ subroutine lanczos_tridiag_sparse_reortho_c(H_v, H_c, H_p, u0, alpha, beta, k, n
 
         do ii = 1, 2 ! repeat process twice
             !$OMP PARALLEL PRIVATE(j, z_t, coef) SHARED(sze, incx, incy, uu, z)
+            allocate(z_t(sze))
             z_t = (0.d0, 0.d0)
             !$OMP DO SCHEDULE(GUIDED)
             do j = 1, i
@@ -171,19 +171,22 @@ subroutine lanczos_tridiag_sparse_reortho_c(H_v, H_c, H_p, u0, alpha, beta, k, n
             !$OMP CRITICAL
             z = z - z_t
             !$OMP END CRITICAL
+            deallocate(z_t)
             !$OMP END PARALLEL
         enddo 
 
         beta(i+1) = dznrm2(sze, z, incx)
         if (beta(i+1) < 1e-16) then ! some small number
-        ! add some type of escape or warning for beta(i) = 0
+            print *, 'Ending Lanczos algorithm:'
+            write(*, '(A20, I10, A20, E12.4, A20, E12.4)'), 'final iter: ', i, ' final beta', beta(i+1), ' previous beta', beta(i)
+            deallocate(uu,z)
             exit
         end if
 
         uu(:,i+1) = z / beta(i+1)
     enddo
 
-
+    deallocate(uu,z)
 end
 
 !
@@ -370,10 +373,12 @@ subroutine lanczos_tridiag_sparse_reortho_r(H_v, H_c, H_p, u0, alpha, beta, k, n
         ! add some type of escape or warning for beta(i) = 0
             print *, 'Ending Lanczos algorithm:'
             write(*, '(A20, I10, A20, E12.4, A20, E12.4)'), 'final iter: ', i, ' final beta', beta(i+1), ' previous beta', beta(i)
+            deallocate(uu,z)
             exit
         end if
 
         uu(:,i+1) = z / beta(i+1)
     enddo
 
+    deallocate(uu,z)
 end

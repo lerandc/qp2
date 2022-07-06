@@ -1,33 +1,3 @@
-! faster loop for getting nonzero entries in H matrix
-
-! use sorted determinants
-! form maps between unique alpha/beta to full determinant space
-! have it be CSR pointer style: ranges are separated by unique alpha
-! thus map is length N_unique_alpha_dets?
-! how to perform a look up for where beta fall?
-
-! get reference determinant from bilinear matrix indexing
-
-! check if it can accept homo/lumo hole/particle
-
-! if so
-! calculate diagonal component
-
-
-! generate list of dets A related by single alpha excitation
-! generate list of dets B related by single beta excitation
-! generate list of dets AA related by double alpha excitation
-! generate list of dets BB related by double beta excitation
-! from A, B, generate list of dets AB and BA related by double alpha/beta excitation
-
-! when generating list, only add dets that:
-! 1) are greater in index in sorting order
-! 2) can accept hole/particle
-
-! iterate over lists and calculate H_ij calculations for determinant pairs
-! using maps, populate COO sparse format at all coordinates where det pairs correspond to
-! populate in row -> column order (this should be implicit in the sorted ordering)
-
 BEGIN_PROVIDER [integer, nnz_max_per_row]
 &BEGIN_PROVIDER [integer, nnz_max_tot]
 
@@ -112,8 +82,8 @@ subroutine form_sparse_dH(csr_s, csr_c, csr_v, sze, dets, iorb, ispin, ac_type, 
 
     integer, intent(in)           :: sze, iorb, ispin, N_det_l
     integer(bit_kind), intent(in) :: dets(N_int, 2, N_det_l)
-    integer, intent(out)          :: csr_s(N_det_l+1), csr_c(sze)
     logical, intent(in)           :: ac_type
+    integer, intent(out)          :: csr_s(N_det_l+1), csr_c(sze)
     double precision, intent(out) :: csr_v(sze)
 
     integer              :: n, i, j, k, l_row, old_row
@@ -128,12 +98,10 @@ subroutine form_sparse_dH(csr_s, csr_c, csr_v, sze, dets, iorb, ispin, ac_type, 
     double precision     :: hij, frac
     double precision, allocatable :: coo_v(:), coo_v_t(:), coo_v_all(:)
     
-    print *, "Nuclear repulsion energy: ", nuclear_repulsion
     ! force provide early so that threads don't each try to provide
     call i_H_j(dets(:,:,1), dets(:,:,1), N_int, hij) 
 
-    
-    !$OMP PARALLEL SHARED(nuclear_repulsion, nnz_tot, nnz_arr, nnz_csr, n_threads, dets, psi_det, N_det, N_det_l, N_int, nnz_max_per_row, n_vals_row,&
+    !$OMP PARALLEL SHARED(nnz_tot, nnz_arr, nnz_csr, n_threads, dets, psi_det, N_det, N_det_l, N_int, nnz_max_per_row, n_vals_row,&
     !$OMP                 coo_r_all, coo_c_all, coo_v_all, csr_s, csr_c, csr_v, coo_s, coo_n)& 
     !$OMP PRIVATE(i,j,old_row, k,ii,kk, scn_a, ID, hij, nnz, nnz_cnt, coo_r, coo_c, coo_v, coo_r_t, coo_c_t, coo_v_t, l_cols, l_row) 
 
@@ -195,7 +163,7 @@ subroutine form_sparse_dH(csr_s, csr_c, csr_v, sze, dets, iorb, ispin, ac_type, 
             nnz_cnt += 1
 
             call i_H_j(dets(:,:,l_row),&
-            dets(:,:,l_cols(j)), N_int, hij)
+                       dets(:,:,l_cols(j)), N_int, hij)
             
             coo_r(nnz_cnt) = l_row
             coo_c(nnz_cnt) = l_cols(j)
@@ -294,7 +262,7 @@ subroutine form_sparse_dH(csr_s, csr_c, csr_v, sze, dets, iorb, ispin, ac_type, 
 
 end
 
-subroutine form_sparse_zH(csr_s, csr_c, csr_v, sze)
+subroutine form_sparse_zH(csr_s, csr_c, csr_v, sze, dets, iorb, ispin, ac_type, N_det_l)
     ! use MKL_SPBLAS
 
     implicit none
@@ -303,8 +271,10 @@ subroutine form_sparse_zH(csr_s, csr_c, csr_v, sze)
     ! in the space of the determinants
     END_DOC
 
-    integer, intent(in)           :: sze
-    integer, intent(out)          :: csr_s(N_det+1), csr_c(sze)
+    integer, intent(in)           :: sze, iorb, ispin, N_det_l
+    integer(bit_kind), intent(in) :: dets(N_int, 2, N_det_l)
+    logical, intent(in)           :: ac_type
+    integer, intent(out)          :: csr_s(N_det_l+1), csr_c(sze)
     complex*16, intent(out) :: csr_v(sze)
 
     integer              :: n, i, j, k, l_row, old_row
@@ -314,24 +284,31 @@ subroutine form_sparse_zH(csr_s, csr_c, csr_v, sze)
     integer :: OMP_get_num_threads, OMP_get_thread_num
     integer, allocatable :: nnz_arr(:), coo_r(:), coo_c(:), l_cols(:)
     integer, allocatable :: coo_r_all(:), coo_c_all(:), coo_r_t(:), coo_c_t(:)
-    integer             :: coo_s(N_det), coo_n(N_det), coo_c_n(N_det), coo_c_n_all(N_det)
-
+    ! integer             :: coo_s(N_det), coo_n(N_det), coo_c_n(N_det), coo_c_n_all(N_det)
+    integer, allocatable:: coo_s(:), coo_n(:)
     double precision     :: frac
     complex*16           :: hij
     complex*16, allocatable :: coo_v(:), coo_v_t(:), coo_v_all(:)
     
 
     ! force provide early so that threads don't each try to provide
-    call i_H_j(psi_det(:,:,1), psi_det(:,:,1), N_int, hij) 
-    
-    !$OMP PARALLEL SHARED(nnz_tot, nnz_arr, nnz_csr, n_threads, psi_det, N_det, N_int, nnz_max_per_row, n_vals_row,&
-    !$OMP                 coo_r_all, coo_c_all, coo_v_all, csr_s, csr_c, csr_v, coo_s, coo_n, coo_c_n_all)& 
-    !$OMP PRIVATE(i,j,old_row, k,ii,kk, scn_a, ID, hij, nnz, nnz_cnt, coo_r, coo_c, coo_v, coo_r_t, coo_c_t, coo_v_t, coo_c_n, l_cols, l_row) 
+    call i_h_j_complex(dets(:,:,1), dets(:,:,1), N_int, hij) 
+
+    !$OMP PARALLEL SHARED(nnz_tot, nnz_arr, nnz_csr, n_threads, dets, psi_det, N_det, N_det_l, N_int, nnz_max_per_row, n_vals_row,&
+    !$OMP                 coo_r_all, coo_c_all, coo_v_all, csr_s, csr_c, csr_v, coo_s, coo_n)& 
+    !$OMP PRIVATE(i,j,old_row, k,ii,kk, scn_a, ID, hij, nnz, nnz_cnt, coo_r, coo_c, coo_v, coo_r_t, coo_c_t, coo_v_t, l_cols, l_row) 
 
     !$ n_threads = OMP_get_num_threads()
     !$ ID = OMP_get_thread_num() + 1
+
+    !$OMP SINGLE
+    allocate(coo_s(N_det_l), coo_n(N_det_l))
+    coo_n = 0
+    !$OMP END SINGLE
+    !$OMP BARRIER
+
     frac = 0.2
-    n_vals = max(nint(N_det*N_det*frac/n_threads), 128)
+    n_vals = max(nint(N_det_l*N_det_l*frac/n_threads), 128)
     n_vals_row = nnz_max_per_row
 
     allocate(coo_r(n_vals))
@@ -348,17 +325,18 @@ subroutine form_sparse_zH(csr_s, csr_c, csr_v, sze)
     print *, "## Calculating nonzero entries"
     !$OMP END SINGLE
     
-    coo_c_n = 0
-    coo_c_n_all = 0
     nnz_cnt = 0
     !$OMP DO SCHEDULE(GUIDED)
-    do i = 1, N_det
+    do i = 1, N_det ! this loop needs to go over all the determinants, since this loop is not in determiant order but rather k_a order
         nnz = 0
         l_cols = 0
-        call get_sparse_columns(i, l_cols, nnz, n_vals_row)
+        call get_sparse_columns(i, l_cols, l_row, nnz, n_vals_row,&
+                                 iorb, ispin, ac_type, N_det_l)
+
+        if (nnz == 0) cycle
 
         ! reallocate arrays if necessary
-        if (nnz_cnt + nnz + 1 > size(coo_r, 1)) then
+        if (nnz_cnt + nnz > size(coo_r, 1)) then
             allocate(coo_r_t(nnz_cnt + 10*nnz))
             allocate(coo_c_t(nnz_cnt + 10*nnz))
             allocate(coo_v_t(nnz_cnt + 10*nnz))
@@ -372,19 +350,17 @@ subroutine form_sparse_zH(csr_s, csr_c, csr_v, sze)
             call move_alloc(coo_v_t, coo_v)
         end if
         
-        ! first column is the row of the determinants
-        l_row = l_cols(1)
-
-        coo_n(l_row) = nnz + 1 ! store for later
-        do j = 1, nnz+1
+        
+        coo_n(l_row) = nnz ! store for later
+        do j = 1, nnz
             nnz_cnt += 1
-            call i_h_j_complex(psi_det(:,:,l_row),&
-            psi_det(:,:,l_cols(j)), N_int, hij)
+
+            call i_h_j_complex(dets(:,:,l_row),&
+                               dets(:,:,l_cols(j)), N_int, hij)
             
             coo_r(nnz_cnt) = l_row
             coo_c(nnz_cnt) = l_cols(j)
             coo_v(nnz_cnt) = hij
-            coo_c_n(l_cols(j)) += 1
         end do
     end do
     !$OMP END DO
@@ -393,10 +369,14 @@ subroutine form_sparse_zH(csr_s, csr_c, csr_v, sze)
 
     !$OMP CRITICAl
     nnz_tot = nnz_tot + nnz_cnt
-    coo_c_n_all = coo_c_n_all + coo_c_n
     !$OMP END CRITICAl
     !$OMP BARRIER
-
+    
+    !$OMP SINGLE
+    print *, "Total non-zero entries: ", nnz_tot, " max size:", sze
+    print *, "## Constructing pointer arrays"
+    !$OMP END SINGLE
+    
     !$OMP SINGLE
     allocate(coo_r_all(nnz_tot))
     allocate(coo_c_all(nnz_tot))
@@ -411,20 +391,9 @@ subroutine form_sparse_zH(csr_s, csr_c, csr_v, sze)
     coo_r_all(k+1:k+nnz_arr(ID)) = coo_r
     coo_c_all(k+1:k+nnz_arr(ID)) = coo_c
     coo_v_all(k+1:k+nnz_arr(ID)) = coo_v
-
     !$OMP BARRIER
 
-
-    !TODO: at this point, you should check that sze >= nnz_csr
-    nnz_csr = 2*nnz_tot-N_det! COO was taken from upper triangle, account for double counting of diagonal
-    !$OMP SINGLE
-    print *, "Total non-zero entries: ", nnz_csr, " max size:", sze
-    print *, "## Constructing pointer arrays"
-    !$OMP END SINGLE
-    
-
     ! calculate the starting index of each row in COO, since they were not sorted
-
     ! iterate over range, keep track of current row; if row changes, record the row start
     ii = (nnz_tot / n_threads)*(ID-1) + 1 ! start of range
     kk = (nnz_tot / n_threads) * ID + 3 ! end of range, slight overlap to catch boundary pointers
@@ -449,21 +418,15 @@ subroutine form_sparse_zH(csr_s, csr_c, csr_v, sze)
 
     !$OMP SINGLE
     csr_s(1) = 1
-    csr_s(N_det+1) = 1 
+    csr_s(2:N_det_l+1) = coo_n
     !$OMP END SINGLE
     
-    !$OMP DO SCHEDULE(GUIDED) 
-    do i = 2, N_det+1
-        csr_s(i) = coo_n(i-1) + coo_c_n_all(i-1) - 1 ! account for double counting
-    end do
-    !$OMP END DO
-
     ! need to strongly enforce synchronization here
     !$OMP BARRIER
     !$OMP SINGLE
     scn_a = 0
     !$OMP SIMD REDUCTION(inscan, +:scn_a)
-    do i = 1, N_det+1
+    do i = 1, N_det_l+1
         scn_a = scn_a + csr_s(i)
         !$OMP SCAN INCLUSIVE(scn_a)
         csr_s(i) = scn_a
@@ -477,29 +440,17 @@ subroutine form_sparse_zH(csr_s, csr_c, csr_v, sze)
 
     ! loop through rows and construct CSR matrix
     !$OMP DO SCHEDULE(GUIDED)
-    do i = 1, N_det
-        k = 0
-        do j = 1, i-1
-            ! get pre-diagonal entries
-            ! search jth row for column i
-            do ii = coo_s(j)+1, coo_s(j) + coo_n(j) -1
-                if (coo_c_all(ii) == i) then
-                    csr_v(csr_s(i) + k) = dconjg(coo_v_all(ii)) !! this is the only significant part different from real valued Hamiltonian code
-                    csr_c(csr_s(i) + k) = j !coo_c_all(ii)
-                    k += 1
-                    exit
-                end if
-            end do
-        end do
-        
-        ! get diagonal+ entries
-        do ii = coo_s(i), coo_s(i) + coo_n(i) - 1
-            csr_v(csr_s(i) + k) = coo_v_all(ii)
-            csr_c(csr_s(i) + k) = coo_c_all(ii)
-            k += 1
-        end do
+    do i = 1, N_det_l
+        csr_v(csr_s(i):csr_s(i+1)-1) = coo_v_all(coo_s(i):coo_s(i+1)-1)
+        csr_c(csr_s(i):csr_s(i+1)-1) = coo_c_all(coo_s(i):coo_s(i+1)-1)
     end do
     !$OMP END DO
+
+    deallocate(coo_r, coo_c, coo_v, l_cols)
+
+    !$OMP SINGLE
+    deallocate(coo_s, coo_n, nnz_arr, coo_r_all, coo_c_all, coo_v_all)
+    !$OMP END SINGLE
     !$OMP END PARALLEL
 
 end
