@@ -96,7 +96,7 @@ subroutine lanczos_tridiag_reortho_c(H, u0, alpha, beta, k, sze)
 
         do ii = 1, 2 ! repeat process twice
             !$OMP PARALLEL PRIVATE(j, z_t, coef) SHARED(sze, incx, incy, uu, z)
-            z_t = (0.d0, 0.d00)
+            z_t = (0.d0, 0.d0)
             !$OMP DO SCHEDULE(GUIDED)
             do j = 1, i
                 coef = zdotc(sze, z, incx, uu(:,j), incy)
@@ -164,7 +164,7 @@ subroutine lanczos_tridiag_sparse_reortho_c(H_v, H_c, H_p, u0, alpha, beta, k, n
             !$OMP DO SCHEDULE(GUIDED)
             do j = 1, i
                 coef = zdotc(sze, z, incx, uu(:,j), incy)
-                z_t = z_t - coef * uu(:,j)
+                z_t = z_t + coef * uu(:,j)
             enddo
             !$OMP END DO
 

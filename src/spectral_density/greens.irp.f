@@ -33,7 +33,7 @@ BEGIN_PROVIDER [complex*16, greens_A, (greens_omega_N, n_iorb_A, ns_dets)]
     double precision, allocatable  ::  H_v(:), t_H_v(:), psi_coef_excited(:,:)
     integer(bit_kind), allocatable :: det_excited(:,:,:)
 
-    greens_A = 0.0
+    greens_A = (0.d0, 0.d0)
     s_max_sze = max_row_sze_factor*nnz_max_per_row
 
     do i_n_det = 1, ns_dets
@@ -117,7 +117,7 @@ BEGIN_PROVIDER [complex*16, greens_R, (greens_omega_N, n_iorb_R, ns_dets)]
     double precision, allocatable  :: psi_coef_excited(:,:) 
     integer(bit_kind), allocatable :: det_excited(:,:,:)
 
-    greens_R = 0.d0
+    greens_R = (0.d0, 0.d0)
     s_max_sze = max_row_sze_factor*nnz_max_per_row
 
     do i_n_det = 1, ns_dets
@@ -205,7 +205,7 @@ BEGIN_PROVIDER [complex*16, greens_A_complex, (greens_omega_N, n_iorb_A,ns_dets)
     complex*16 , allocatable  ::  H_v(:), t_H_v(:), psi_coef_excited(:,:)
 
 
-    greens_A_complex = 0.d0
+    greens_A_complex = (0.d0, 0.d0)
     s_max_sze = max_row_sze_factor*nnz_max_per_row
 
     do i_n_det = 1, ns_dets
@@ -283,7 +283,7 @@ BEGIN_PROVIDER [complex*16, greens_R_complex, (greens_omega_N, n_iorb_R,ns_dets)
     complex*16 , allocatable  ::  H_v(:), t_H_v(:), psi_coef_excited(:,:)
 
 
-    greens_R_complex = 0.d0
+    greens_R_complex = (0.d0, 0.d0)
     s_max_sze = max_row_sze_factor*nnz_max_per_row
 
     do i_n_det = 1, ns_dets
@@ -601,7 +601,6 @@ subroutine set_ref_bitmask(iorb, ispin, ac_type)
 
     deallocate(t_occ)
 
-
     do i = 1, N_int
         ref_closed_shell_bitmask(i,1) = ref_bitmask(i,1)
         ref_closed_shell_bitmask(i,2) = ref_bitmask(i,2)
@@ -669,6 +668,7 @@ subroutine set_ref_bitmask_complex(iorb, ispin, ac_type)
 
     !! Resetting bitmasks
     ! adjust alpha/beta sizes based on annihilation vs creation and spin type
+    ! should this be divided by number of kpts?
     a = elec_alpha_num + merge(merge(-1, 1, ac_type),0,ispin==1)
     b = elec_beta_num  + merge(merge(-1, 1, ac_type),0,ispin==2)
 
@@ -739,6 +739,7 @@ subroutine set_ref_bitmask_complex(iorb, ispin, ac_type)
     end do
 
     ! clear out extra orbitals
+    occ = 0
     if (a < b) then
         do k = 1, kpt_num
             call bitstring_to_list_ab(ref_bitmask_kpts(1,1,k),occ, n_occ_ab,N_int)
@@ -795,9 +796,7 @@ subroutine set_ref_bitmask_complex(iorb, ispin, ac_type)
         end do
     end do
 
-    print *, "before forced provide"
     !! Force provides for single excitation things
     PROVIDE fock_op_cshell_ref_bitmask_kpts
-    print *, "after forced provide"
 
 end
