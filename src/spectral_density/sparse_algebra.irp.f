@@ -27,24 +27,45 @@ subroutine sparse_csr_dmv(A_v, A_c, A_p, x, y, sze, nnz)
     implicit none
     BEGIN_DOC
     ! Compute the matrix vector product y = Ax with sparse A in CSR format
-    ! Not general. Assumes A is sze x sze; x, y are sze
+    ! Not general. Assumes A is sze x sze and symmetric; x, y are sze
     END_DOC
 
     integer,          intent(in)  :: sze, nnz, A_c(nnz), A_p(sze+1)
     double precision, intent(in)  :: A_v(nnz), x(sze)
     double precision, intent(out) :: y(sze)
+    double precision, allocatable :: y_t(:)
     integer                       :: i, j
 
     ! loop over rows
-    !$OMP PARALLEL DO PRIVATE(i, j) SHARED(y, x, A_c, A_p, A_v, sze)&
-    !$OMP SCHEDULE(GUIDED)
+    !$OMP PARALLEL PRIVATE(i, j, y_t) SHARED(y, x, A_c, A_p, A_v, sze)
+    allocate(y_t(sze))
+    y_t = 0.d0
+    !$OMP BARRIER
+    !$OMP DO SCHEDULE(GUIDED)
     do i = 1, sze
         ! loop over columns
-        do j = A_p(i), A_p(i+1)-1
-            y(i) = y(i) + A_v(j) * x(A_c(j))
+
+        ! first entry per column is guaranteed to be diagonal since all diagonal
+        ! elements of H are nonzero
+        j = A_p(i)
+        y_t(i) = y_t(i) + A_v(j) * x(A_c(j))
+
+        do j = A_p(i)+1, A_p(i+1)-1
+            ! calculate element of owned row
+            y_t(i) = y_t(i) + A_v(j) * x(A_c(j))
+
+            ! calculate element of owned column
+            y_t(A_c(j)) = y_t(A_c(j)) + A_v(j) * x(i)
         end do
     end do
-    !$OMP END PARALLEL DO
+    !$OMP END DO
+
+    !$OMP CRITICAL
+    y = y + y_t
+    !$OMP END CRITICAL
+
+    deallocate(y_t)
+    !$OMP END PARALLEL
 end
 
 subroutine sparse_csr_zmv(A_v, A_c, A_p, x, y, sze, nnz)
@@ -57,18 +78,40 @@ subroutine sparse_csr_zmv(A_v, A_c, A_p, x, y, sze, nnz)
     integer,          intent(in)  :: sze, nnz, A_c(nnz), A_p(sze+1)
     complex*16,       intent(in)  :: A_v(nnz), x(sze)
     complex*16,       intent(out) :: y(sze)
+    complex*16,      allocatable  :: y_t(:)
     integer                       :: i, j
 
     ! loop over rows
-    !$OMP PARALLEL DO PRIVATE(i, j) SHARED(y, x, A_c, A_p, A_v, sze)&
-    !$OMP SCHEDULE(GUIDED)
+    !$OMP PARALLEL PRIVATE(i, j, y_t) SHARED(y, x, A_c, A_p, A_v, sze)
+
+    allocate(y_t(sze))
+    y_t = (0.d0, 0.d0)
+    !$OMP BARRIER
+    !$OMP DO SCHEDULE(GUIDED)
     do i = 1, sze
         ! loop over columns
-        do j = A_p(i), A_p(i+1)-1
-            y(i) = y(i) + A_v(j) * x(A_c(j))
+
+        ! first entry per column is guaranteed to be diagonal since all diagonal
+        ! elements of H are nonzero
+        j = A_p(i)
+        y_t(i) = y_t(i) + A_v(j) * x(A_c(j))
+
+        do j = A_p(i)+1, A_p(i+1)-1
+            ! calculate element of owned row
+            y_t(i) = y_t(i) + A_v(j) * x(A_c(j))
+
+            ! calculate element of owned column
+            y_t(A_c(j)) = y_t(A_c(j)) + conjg(A_v(j)) * x(i)
         end do
     end do
-    !$OMP END PARALLEL DO
+    !$OMP END DO
+
+    !$OMP CRITICAL
+    y = y + y_t
+    !$OMP END CRITICAL
+
+    deallocate(y_t)
+    !$OMP END PARALLEL
 end
 
 subroutine form_sparse_dH(csr_s, csr_c, csr_v, sze, dets, iorb, ispin, ac_type, N_det_l)
@@ -506,8 +549,8 @@ subroutine get_sparse_columns(k_a, columns, row, nnz, nnz_max, iorb, ispin, ac_t
     do i = psi_bilinear_matrix_columns_loc(kcol), psi_bilinear_matrix_columns_loc(kcol+1)-1
         lidx = psi_bilinear_matrix_order(i)
         
-        ! if ((lidx <= kidx) .or. (lidx > N_det_l)) cycle
-        if (lidx > N_det_l) cycle
+        if ((lidx <= kidx) .or. (lidx > N_det_l)) cycle
+        ! if (lidx > N_det_l) cycle
 
         lcol = psi_bilinear_matrix_columns(i)
         lrow = psi_bilinear_matrix_rows(i)
@@ -547,8 +590,8 @@ subroutine get_sparse_columns(k_a, columns, row, nnz, nnz_max, iorb, ispin, ac_t
         tidx = psi_bilinear_matrix_transp_order(i)
         lidx = psi_bilinear_matrix_order(tidx)
 
-        ! if ((lidx <= kidx) .or. (lidx > N_det_l)) cycle
-        if (lidx > N_det_l) cycle
+        if ((lidx <= kidx) .or. (lidx > N_det_l)) cycle
+        ! if (lidx > N_det_l) cycle
         
         lcol = psi_bilinear_matrix_transp_columns(i)
         lrow = psi_bilinear_matrix_transp_rows(i)
@@ -604,8 +647,8 @@ subroutine get_sparse_columns(k_a, columns, row, nnz, nnz_max, iorb, ispin, ac_t
         do i = psi_bilinear_matrix_columns_loc(j), psi_bilinear_matrix_columns_loc(j+1)-1
             lidx = psi_bilinear_matrix_order(i)
 
-            ! if ((lidx <= kidx) .or. (lidx > N_det_l)) cycle
-            if (lidx > N_det_l) cycle
+            if ((lidx <= kidx) .or. (lidx > N_det_l)) cycle
+            ! if (lidx > N_det_l) cycle
 
             lcol = psi_bilinear_matrix_columns(i)
             lrow = psi_bilinear_matrix_rows(i)
