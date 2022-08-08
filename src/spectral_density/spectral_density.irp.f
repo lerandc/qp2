@@ -9,9 +9,9 @@ program spectral_density
     integer(bit_kind), allocatable  :: psi_det_read(:,:,:)
     double precision , allocatable  :: psi_coef_read(:,:)
     complex*16       , allocatable  :: psi_coef_complex_read(:,:)
+    double precision :: tmp_eps
 
     read_wf = .true. 
-
     call ezfio_get_determinants_n_det(N_det_read)
     N_det = N_det_read
     if (N_det == N_det_read) then 
@@ -20,16 +20,23 @@ program spectral_density
         psi_det = psi_det_read
         deallocate(psi_det_read)
     end if
-
+    
     if (is_complex) then 
         allocate(psi_coef_complex_read(N_det, N_states))
         call ezfio_get_determinants_psi_coef_complex(psi_coef_complex_read)
         psi_coef_complex = psi_coef_complex_read
         deallocate(psi_coef_complex_read)
-
+        
         force_reads = size(psi_coef_complex, 1) == N_det_read .and.&
         size(psi_det, 3)  == N_det_read .and. read_wf
         if(force_reads) then
+            ! PROVIDE one_e_dm_mo_kpts
+            ! print *, rho_k
+            ! print *, structure_factors
+            ! print *, dielectric_eps
+
+            ! call calc_dielectric_eps(tmp_eps)
+            ! print *, tmp_eps
             if(spectral_density_calc_A) then
                 call ezfio_set_spectral_density_spectral_density_A_complex(spectral_density_A_complex)
                 if(write_greens_f) then

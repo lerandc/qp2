@@ -2423,7 +2423,7 @@ subroutine i_H_j_complex(key_i,key_j,Nint,hij)
   double precision               :: diag_H_mat_elem, phase
   integer                        :: n_occ_ab(2)
   logical :: is_allowed
-  PROVIDE mo_two_e_integrals_in_map mo_integrals_map big_array_exchange_integrals_complex
+  PROVIDE mo_two_e_integrals_in_map mo_integrals_map big_array_exchange_integrals_kpts
 
   ASSERT (Nint > 0)
   ASSERT (Nint == N_int)

@@ -7,7 +7,7 @@ BEGIN_PROVIDER [integer, nnz_max_per_row]
     END_DOC
     implicit none
 
-    integer     :: s_a, s_b, d_a, d_b
+    integer*8     :: s_a, s_b, d_a, d_b
 
     s_a = elec_alpha_num * (mo_num - elec_alpha_num)
     s_b = elec_beta_num * (mo_num - elec_beta_num)
