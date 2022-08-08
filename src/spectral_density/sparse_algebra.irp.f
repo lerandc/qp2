@@ -128,9 +128,9 @@ subroutine form_sparse_dH(csr_s, csr_c, csr_v, sze, dets, iorb, ispin, ac_type, 
     nnz_tot = 0
     !$OMP END SINGLE
     
-    !$OMP SINGLE
-    print *, "## Calculating nonzero entries"
-    !$OMP END SINGLE
+    ! !$OMP SINGLE
+    ! print *, "## Calculating nonzero entries"
+    ! !$OMP END SINGLE
     
     nnz_cnt = 0
     !$OMP DO SCHEDULE(GUIDED)
@@ -180,8 +180,8 @@ subroutine form_sparse_dH(csr_s, csr_c, csr_v, sze, dets, iorb, ispin, ac_type, 
     !$OMP BARRIER
     
     !$OMP SINGLE
-    print *, "Total non-zero entries: ", nnz_tot, " max size:", sze
-    print *, "## Constructing pointer arrays"
+    print *, "Total non-zero entries in Hamiltonian: ", nnz_tot, " max size:", sze
+    ! print *, "## Constructing pointer arrays"
     !$OMP END SINGLE
     
     !$OMP SINGLE
@@ -241,9 +241,9 @@ subroutine form_sparse_dH(csr_s, csr_c, csr_v, sze, dets, iorb, ispin, ac_type, 
     !$OMP END SINGLE
     !$OMP BARRIER
 
-    !$OMP SINGLE
-    print *, "## Constructing CSR arrays"
-    !$OMP END SINGLE
+    ! !$OMP SINGLE
+    ! print *, "## Constructing CSR arrays"
+    ! !$OMP END SINGLE
 
     ! loop through rows and construct CSR matrix
     !$OMP DO SCHEDULE(GUIDED)
@@ -321,9 +321,9 @@ subroutine form_sparse_zH(csr_s, csr_c, csr_v, sze, dets, iorb, ispin, ac_type, 
     nnz_tot = 0
     !$OMP END SINGLE
     
-    !$OMP SINGLE
-    print *, "## Calculating nonzero entries"
-    !$OMP END SINGLE
+    ! !$OMP SINGLE
+    ! print *, "## Calculating nonzero entries"
+    ! !$OMP END SINGLE
     
     nnz_cnt = 0
     !$OMP DO SCHEDULE(GUIDED)
@@ -374,7 +374,7 @@ subroutine form_sparse_zH(csr_s, csr_c, csr_v, sze, dets, iorb, ispin, ac_type, 
     
     !$OMP SINGLE
     print *, "Total non-zero entries: ", nnz_tot, " max size:", sze
-    print *, "## Constructing pointer arrays"
+    ! print *, "## Constructing pointer arrays"
     !$OMP END SINGLE
     
     !$OMP SINGLE
@@ -434,9 +434,9 @@ subroutine form_sparse_zH(csr_s, csr_c, csr_v, sze, dets, iorb, ispin, ac_type, 
     !$OMP END SINGLE
     !$OMP BARRIER
 
-    !$OMP SINGLE
-    print *, "## Constructing CSR arrays"
-    !$OMP END SINGLE
+    ! !$OMP SINGLE
+    ! print *, "## Constructing CSR arrays"
+    ! !$OMP END SINGLE
 
     ! loop through rows and construct CSR matrix
     !$OMP DO SCHEDULE(GUIDED)

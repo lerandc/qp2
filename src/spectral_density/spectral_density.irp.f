@@ -107,8 +107,8 @@ BEGIN_PROVIDER [double precision, spectral_density_A, (greens_omega_N, n_iorb_A,
 
     double precision :: pi
 
-    pi = acos(-1.0)
-    spectral_density_A = (-1.0/pi) * aimag(greens_A)
+    pi = acos(-1.d0)
+    spectral_density_A = (-1.d0/pi) * aimag(greens_A)
 
 END_PROVIDER
 
@@ -118,7 +118,7 @@ BEGIN_PROVIDER [double precision, spectral_density_R, (greens_omega_N, n_iorb_R,
     double precision :: pi
 
     pi = acos(-1.0)
-    spectral_density_R = (-1.0/pi) * aimag(greens_R)
+    spectral_density_R = (-1.d0/pi) * aimag(greens_R)
 
 END_PROVIDER
 
@@ -127,8 +127,8 @@ BEGIN_PROVIDER [double precision, spectral_density_A_complex, (greens_omega_N, n
 
     double precision :: pi
 
-    pi = acos(-1.0)
-    spectral_density_A_complex = (-1.0/pi) * aimag(greens_A_complex)
+    pi = acos(-1.d0)
+    spectral_density_A_complex = (-1.d0/pi) * aimag(greens_A_complex)
 
 END_PROVIDER
 
@@ -137,7 +137,7 @@ BEGIN_PROVIDER [double precision, spectral_density_R_complex, (greens_omega_N, n
 
     double precision :: pi
 
-    pi = acos(-1.0)
-    spectral_density_R_complex = (-1.0/pi) * aimag(greens_R_complex)
+    pi = acos(-1.d0)
+    spectral_density_R_complex = (-1.d0/pi) * aimag(greens_R_complex)
 
 END_PROVIDER
