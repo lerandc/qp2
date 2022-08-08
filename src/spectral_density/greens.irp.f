@@ -26,12 +26,14 @@ BEGIN_PROVIDER [complex*16, greens_A, (greens_omega_N, n_iorb_A, ns_dets)]
     implicit none
 
     double precision        :: alpha(lanczos_N), beta(lanczos_N), epsilon
-    double precision        :: E0, norm, dnrm2
+    double precision        :: E0, norm, dnrm2, pi
     complex*16              :: z(greens_omega_N), zalpha(lanczos_N), bbeta(lanczos_N), cfraction_c
-    integer                 :: i, iorb, nnz, s_max_sze, i_n_det, N_det_l
+    integer                 :: i, iorb, nnz, i_n_det, N_det_l
+    integer*8               :: s_max_sze
     integer, allocatable    :: H_c(:), t_H_c(:), H_p(:)
     double precision, allocatable  ::  H_v(:), t_H_v(:), psi_coef_excited(:,:)
     integer(bit_kind), allocatable :: det_excited(:,:,:)
+    character(len=80)       :: filename
 
     greens_A = (0.d0, 0.d0)
     s_max_sze = max_row_sze_factor*nnz_max_per_row
@@ -95,6 +97,54 @@ BEGIN_PROVIDER [complex*16, greens_A, (greens_omega_N, n_iorb_A, ns_dets)]
             end do
             !$OMP END PARALLEL DO
 
+            if (dump_intermediate_output) then
+                print *, "Dumping intermediate outputs to: "
+                ! write out abcissa
+                write(filename, *), "omega_A.out"
+                print *, filename
+                call dump_array_real(filename, greens_omega, greens_omega_N)
+
+                ! if requested, write out greens functions
+                if (write_greens_f) then
+                    write(filename, "(A, A, I4.4, A, I10.10, A)"), "greens_A",&
+                                                        "_iorb_", iorb_A(iorb), &
+                                                        "_ndets_", N_det_l,&
+                                                        ".out"
+                    print *, filename
+                    call dump_array_complex(filename, greens_A(:, iorb, i_n_det), greens_omega_N)
+                end if
+
+                ! write out spectral density
+                write(filename, "(A, A, I4.4, A, I10.10, A)"), "spectral_density_A",&
+                                                    "_iorb_", iorb_A(iorb), &
+                                                    "_ndets_", N_det_l,&
+                                                    ".out"
+                print *, filename
+
+                pi = acos(-1.0)
+                call dump_array_real(filename, (-1.0/pi) * aimag(greens_A(:, iorb, i_n_det)), greens_omega_N)
+
+                ! if requested, write out lanczos vectors
+
+                if (write_lanczos_ab) then
+                    write(filename, "(A, A, I4.4, A, I10.10, A, I6.6, A)"), "lanczos_alpha_A",&
+                                                        "_iorb_", iorb_A(iorb),&
+                                                        "_ndets_", N_det_l,&
+                                                        "_nvecs_", lanczos_N,&
+                                                        ".out"
+                    print *, filename
+                    call dump_array_real(filename, lanczos_alpha_A(:, iorb, i_n_det), lanczos_N)
+
+                    write(filename, "(A, A, I4.4, A, I10.10, A, I6.6, A)"), "lanczos_beta_A",&
+                                                        "_iorb_", iorb_A(iorb),&
+                                                        "_ndets_", N_det_l,&
+                                                        "_nvecs_", lanczos_N,&
+                                                        ".out"
+                    print *, filename
+                    call dump_array_real(filename, lanczos_beta_A(:, iorb, i_n_det), lanczos_N)
+                end if
+            end if
+
             deallocate(H_c, H_v, H_p)
         end do
 
@@ -109,13 +159,15 @@ BEGIN_PROVIDER [complex*16, greens_R, (greens_omega_N, n_iorb_R, ns_dets)]
     implicit none
 
     double precision        :: alpha(lanczos_N), beta(lanczos_N), epsilon
-    double precision        :: E0, norm, dnrm2
+    double precision        :: E0, norm, dnrm2, pi
     complex*16              :: z(greens_omega_N), zalpha(lanczos_N), bbeta(lanczos_N), cfraction_c
-    integer                 :: i, iorb, nnz, s_max_sze, i_n_det, N_det_l
+    integer                 :: i, iorb, nnz, i_n_det, N_det_l
+    integer*8               :: s_max_sze
     integer, allocatable    :: H_c(:), H_p(:), t_H_c(:)
     double precision , allocatable  ::  H_v(:), t_H_v(:)
     double precision, allocatable  :: psi_coef_excited(:,:) 
     integer(bit_kind), allocatable :: det_excited(:,:,:)
+    character(len=80)       :: filename
 
     greens_R = (0.d0, 0.d0)
     s_max_sze = max_row_sze_factor*nnz_max_per_row
@@ -178,6 +230,54 @@ BEGIN_PROVIDER [complex*16, greens_R, (greens_omega_N, n_iorb_R, ns_dets)]
             end do
             !$OMP END PARALLEL DO
 
+            if (dump_intermediate_output) then
+                print *, "Dumping intermediate outputs to: "
+                ! write out abcissa
+                write(filename, *), "omega_R.out"
+                print *, filename
+                call dump_array_real(filename, -1.d0*greens_omega, greens_omega_N)
+
+                ! if requested, write out greens functions
+                if (write_greens_f) then
+                    write(filename, "(A, A, I4.4, A, I10.10, A)"), "greens_R",&
+                                                        "_iorb_", iorb_R(iorb), &
+                                                        "_ndets_", N_det_l,&
+                                                        ".out"
+                    print *, filename
+                    call dump_array_complex(filename, greens_R(:, iorb, i_n_det), greens_omega_N)
+                end if
+
+                ! write out spectral density
+                write(filename, "(A, A, I4.4, A, I10.10, A)"), "spectral_density_R",&
+                                                    "_iorb_", iorb_R(iorb), &
+                                                    "_ndets_", N_det_l,&
+                                                    ".out"
+                print *, filename
+
+                pi = acos(-1.0)
+                call dump_array_real(filename, (-1.0/pi) * aimag(greens_R(:, iorb, i_n_det)), greens_omega_N)
+
+                ! if requested, write out lanczos vectors
+
+                if (write_lanczos_ab) then
+                    write(filename, "(A, A, I4.4, A, I10.10, A, I6.6, A)"), "lanczos_alpha_R",&
+                                                        "_iorb_", iorb_R(iorb),&
+                                                        "_ndets_", N_det_l,&
+                                                        "_nvecs_", lanczos_N,&
+                                                        ".out"
+                    print *, filename
+                    call dump_array_real(filename, lanczos_alpha_R(:, iorb, i_n_det), lanczos_N)
+
+                    write(filename, "(A, A, I4.4, A, I10.10, A, I6.6, A)"), "lanczos_beta_R",&
+                                                        "_iorb_", iorb_R(iorb),&
+                                                        "_ndets_", N_det_l,&
+                                                        "_nvecs_", lanczos_N,&
+                                                        ".out"
+                    print *, filename
+                    call dump_array_real(filename, lanczos_beta_R(:, iorb, i_n_det), lanczos_N)
+                end if
+            end if
+
             deallocate(H_c, H_v, H_p)
         end do
 
@@ -197,13 +297,14 @@ BEGIN_PROVIDER [complex*16, greens_A_complex, (greens_omega_N, n_iorb_A,ns_dets)
 &BEGIN_PROVIDER[double precision, lanczos_beta_A_complex, (lanczos_N, n_iorb_A,ns_dets)]   
     implicit none
 
-    double precision        :: alpha(lanczos_N), beta(lanczos_N), epsilon, E0, norm, dznrm2
+    double precision        :: alpha(lanczos_N), beta(lanczos_N), epsilon, E0, norm, dznrm2, pi
     complex*16              :: z(greens_omega_N), zalpha(lanczos_N), bbeta(lanczos_N), cfraction_c
-    integer                 :: i, iorb, nnz, s_max_sze, i_n_det, N_det_l
+    integer                 :: i, iorb, nnz, i_n_det, N_det_l
+    integer*8               :: s_max_sze
     integer, allocatable    :: H_c(:), H_p(:), t_H_c(:)
     integer(bit_kind), allocatable :: det_excited(:,:,:)
     complex*16 , allocatable  ::  H_v(:), t_H_v(:), psi_coef_excited(:,:)
-
+    character(len=80)       :: filename
 
     greens_A_complex = (0.d0, 0.d0)
     s_max_sze = max_row_sze_factor*nnz_max_per_row
@@ -263,6 +364,55 @@ BEGIN_PROVIDER [complex*16, greens_A_complex, (greens_omega_N, n_iorb_A,ns_dets)
             end do
             !$OMP END PARALLEL DO
 
+            if (dump_intermediate_output) then
+                print *, "Dumping intermediate outputs to: "
+                ! write out abcissa
+                write(filename, *), "omega_A_complex.out"
+                print *, filename
+                call dump_array_real(filename, greens_omega, greens_omega_N)
+
+                ! if requested, write out greens functions
+                if (write_greens_f) then
+                    write(filename, "(A, A, I4.4, A, I10.10, A)"), "greens_A_complex",&
+                                                        "_iorb_", iorb_A(iorb), &
+                                                        "_ndets_", N_det_l,&
+                                                        ".out"
+                    print *, filename
+                    call dump_array_complex(filename,&
+                                            greens_A_complex(:,iorb,i_n_det), greens_omega_N)
+                end if
+
+                ! write out spectral density
+                write(filename, "(A, A, I4.4, A, I10.10, A)"), "spectral_density_A_complex",&
+                                                    "_iorb_", iorb_A(iorb), &
+                                                    "_ndets_", N_det_l,&
+                                                    ".out"
+                print *, filename
+
+                pi = acos(-1.0)
+                call dump_array_real(filename, (-1.0/pi) * aimag(greens_A_complex(:, iorb, i_n_det)), greens_omega_N)
+
+                ! if requested, write out lanczos vectors
+
+                if (write_lanczos_ab) then
+                    write(filename, "(A, A, I4.4, A, I10.10, A, I6.6, A)"), "lanczos_alpha_A_complex",&
+                                                        "_iorb_", iorb_A(iorb),&
+                                                        "_ndets_", N_det_l,&
+                                                        "_nvecs_", lanczos_N,&
+                                                        ".out"
+                    print *, filename
+                    call dump_array_real(filename, lanczos_alpha_A_complex(:, iorb, i_n_det), lanczos_N)
+
+                    write(filename, "(A, A, I4.4, A, I10.10, A, I6.6, A)"), "lanczos_beta_A_complex",&
+                                                        "_iorb_", iorb_A(iorb),&
+                                                        "_ndets_", N_det_l,&
+                                                        "_nvecs_", lanczos_N,&
+                                                        ".out"
+                    print *, filename
+                    call dump_array_real(filename, lanczos_beta_A_complex(:, iorb, i_n_det), lanczos_N)
+                end if
+            end if
+
             deallocate(H_c, H_v, H_p)
         end do
 
@@ -275,13 +425,14 @@ BEGIN_PROVIDER [complex*16, greens_R_complex, (greens_omega_N, n_iorb_R,ns_dets)
 &BEGIN_PROVIDER[double precision, lanczos_beta_R_complex, (lanczos_N, n_iorb_R,ns_dets)]   
     implicit none
 
-    double precision        :: alpha(lanczos_N), beta(lanczos_N), epsilon, E0, norm, dznrm2
+    double precision        :: alpha(lanczos_N), beta(lanczos_N), epsilon, E0, norm, dznrm2, pi
     complex*16              :: z(greens_omega_N), zalpha(lanczos_N), bbeta(lanczos_N), cfraction_c
-    integer                 :: i, iorb, nnz, s_max_sze, i_n_det, N_det_l
+    integer                 :: i, iorb, nnz, i_n_det, N_det_l
+    integer*8               :: s_max_sze
     integer, allocatable    :: H_c(:), H_p(:), t_H_c(:)
     integer(bit_kind), allocatable :: det_excited(:,:,:)
     complex*16 , allocatable  ::  H_v(:), t_H_v(:), psi_coef_excited(:,:)
-
+    character(len=80)       :: filename
 
     greens_R_complex = (0.d0, 0.d0)
     s_max_sze = max_row_sze_factor*nnz_max_per_row
@@ -340,6 +491,55 @@ BEGIN_PROVIDER [complex*16, greens_R_complex, (greens_omega_N, n_iorb_R,ns_dets)
                 greens_R_complex(i, iorb, i_n_det) = -1.d0*cfraction_c((0.d0, 0.d0), bbeta, zalpha, lanczos_N)
             end do
             !$OMP END PARALLEL DO
+
+            if (dump_intermediate_output) then
+                print *, "Dumping intermediate outputs to: "
+                ! write out abcissa
+                write(filename, *), "omega_R_complex.out"
+                print *, filename
+                call dump_array_real(filename, greens_omega, greens_omega_N)
+
+                ! if requested, write out greens functions
+                if (write_greens_f) then
+                    write(filename, "(A, A, I4.4, A, I10.10, A)"), "greens_R_complex",&
+                                                        "_iorb_", iorb_R(iorb), &
+                                                        "_ndets_", N_det_l,&
+                                                        ".out"
+                    print *, filename
+                    call dump_array_complex(filename,&
+                                            greens_R_complex(:,iorb,i_n_det), greens_omega_N)
+                end if
+
+                ! write out spectral density
+                write(filename, "(A, A, I4.4, A, I10.10, A)"), "spectral_density_R_complex",&
+                                                    "_iorb_", iorb_R(iorb), &
+                                                    "_ndets_", N_det_l,&
+                                                    ".out"
+                print *, filename
+
+                pi = acos(-1.0)
+                call dump_array_real(filename, (-1.0/pi) * aimag(greens_R_complex(:, iorb, i_n_det)), greens_omega_N)
+
+                ! if requested, write out lanczos vectors
+
+                if (write_lanczos_ab) then
+                    write(filename, "(A, A, I4.4, A, I10.10, A, I6.6, A)"), "lanczos_alpha_R_complex",&
+                                                        "_iorb_", iorb_R(iorb),&
+                                                        "_ndets_", N_det_l,&
+                                                        "_nvecs_", lanczos_N,&
+                                                        ".out"
+                    print *, filename
+                    call dump_array_real(filename, lanczos_alpha_R_complex(:, iorb, i_n_det), lanczos_N)
+
+                    write(filename, "(A, A, I4.4, A, I10.10, A, I6.6, A)"), "lanczos_beta_R_complex",&
+                                                        "_iorb_", iorb_R(iorb),&
+                                                        "_ndets_", N_det_l,&
+                                                        "_nvecs_", lanczos_N,&
+                                                        ".out"
+                    print *, filename
+                    call dump_array_real(filename, lanczos_beta_R_complex(:, iorb, i_n_det), lanczos_N)
+                end if
+            end if
 
             deallocate(H_c, H_v, H_p)
         end do
@@ -798,5 +998,43 @@ subroutine set_ref_bitmask_complex(iorb, ispin, ac_type)
 
     !! Force provides for single excitation things
     PROVIDE fock_op_cshell_ref_bitmask_kpts
+
+end
+
+subroutine dump_array_real(fname, arr, sze)
+    implicit none
+
+    integer, intent(in) :: sze
+    double precision, intent(in) :: arr(sze)
+    character(len=80), intent(in) :: fname
+
+
+    integer :: i
+
+    open(1, file=fname, action="WRITE")
+    do i = 1, sze
+        write(1, "(E16.8)"), arr(i)
+    end do
+
+    close(1)
+
+end
+
+subroutine dump_array_complex(fname, arr, sze)
+    implicit none
+
+    integer, intent(in) :: sze
+    complex*16, intent(in) :: arr(sze)
+    character(len=80), intent(in) :: fname
+
+
+    integer :: i
+
+    open(1, file=fname, action="WRITE")
+    do i = 1, sze
+        write(1, "(E16.8, E16.8)"), real(arr(i)), aimag(arr(i))
+    end do
+
+    close(1)
 
 end
