@@ -123,7 +123,8 @@ subroutine form_sparse_dH(csr_s, csr_c, csr_v, sze, dets, iorb, ispin, ac_type, 
     ! in the space of the determinants
     END_DOC
 
-    integer, intent(in)           :: sze, iorb, ispin, N_det_l
+    integer, intent(in)           :: iorb, ispin, N_det_l
+    integer(kind=8), intent(in)        :: sze
     integer(bit_kind), intent(in) :: dets(N_int, 2, N_det_l)
     logical, intent(in)           :: ac_type
     integer, intent(out)          :: csr_s(N_det_l+1), csr_c(sze)
@@ -314,7 +315,8 @@ subroutine form_sparse_zH(csr_s, csr_c, csr_v, sze, dets, iorb, ispin, ac_type, 
     ! in the space of the determinants
     END_DOC
 
-    integer, intent(in)           :: sze, iorb, ispin, N_det_l
+    integer, intent(in)           :: iorb, ispin, N_det_l
+    integer(kind=8), intent(in)        :: sze
     integer(bit_kind), intent(in) :: dets(N_int, 2, N_det_l)
     logical, intent(in)           :: ac_type
     integer, intent(out)          :: csr_s(N_det_l+1), csr_c(sze)

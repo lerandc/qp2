@@ -30,14 +30,23 @@ BEGIN_PROVIDER [complex*16, greens_A, (greens_omega_N, n_iorb_A, ns_dets)]
     double precision        :: t0, t1
     complex*16              :: z(greens_omega_N), zalpha(lanczos_N), bbeta(lanczos_N), cfraction_c
     integer                 :: i, iorb, nnz, i_n_det, N_det_l
-    integer*8               :: s_max_sze
+    integer(kind=8)              :: s_max_sze
     integer, allocatable    :: H_c(:), t_H_c(:), H_p(:)
     double precision, allocatable  ::  H_v(:), t_H_v(:), psi_coef_excited(:,:)
     integer(bit_kind), allocatable :: det_excited(:,:,:)
     character(len=72)       :: filename
 
     greens_A = (0.d0, 0.d0)
-    s_max_sze = max_row_sze_factor*nnz_max_per_row
+    if (nnz_max_per_row > 0) then
+        s_max_sze = max_row_sze_factor*nnz_max_per_row
+    else 
+        s_max_sze = max_row_sze_factor*1000000 
+    end if
+
+    if (s_max_sze < 0) then
+        print *, "Desired max row size is hitting integer overflow. Setting max size to 2^32"
+        s_max_sze = 2**32
+    end if
 
     print *, "Calculating spectral densities for added electrons in orbitals: "
 
@@ -49,7 +58,7 @@ BEGIN_PROVIDER [complex*16, greens_A, (greens_omega_N, n_iorb_A, ns_dets)]
         end if
     end do
 
-    if (n_iorb_A < 5) write(*,*)," "
+    if (modulo(n_iorb_A, 5) >0) write(*,*)," "
 
     print *, " with N dets of "
 
@@ -61,7 +70,7 @@ BEGIN_PROVIDER [complex*16, greens_A, (greens_omega_N, n_iorb_A, ns_dets)]
         end if
     end do
 
-    if (ns_dets < 5) write(*,*)," "
+    if (modulo(ns_dets,5) > 0) write(*,*)," "
 
     do i_n_det = 1, ns_dets
 
@@ -194,7 +203,7 @@ BEGIN_PROVIDER [complex*16, greens_R, (greens_omega_N, n_iorb_R, ns_dets)]
     double precision        :: t0, t1
     complex*16              :: z(greens_omega_N), zalpha(lanczos_N), bbeta(lanczos_N), cfraction_c
     integer                 :: i, iorb, nnz, i_n_det, N_det_l
-    integer*8               :: s_max_sze
+    integer(kind=8)               :: s_max_sze
     integer, allocatable    :: H_c(:), H_p(:), t_H_c(:)
     double precision , allocatable  ::  H_v(:), t_H_v(:)
     double precision, allocatable  :: psi_coef_excited(:,:) 
@@ -202,7 +211,16 @@ BEGIN_PROVIDER [complex*16, greens_R, (greens_omega_N, n_iorb_R, ns_dets)]
     character(len=72)       :: filename
 
     greens_R = (0.d0, 0.d0)
-    s_max_sze = max_row_sze_factor*nnz_max_per_row
+    if (nnz_max_per_row > 0) then
+        s_max_sze = max_row_sze_factor*nnz_max_per_row
+    else 
+        s_max_sze = max_row_sze_factor*1000000 
+    end if
+
+    if (s_max_sze < 0) then
+        print *, "Desired max row size is hitting integer overflow. Setting max size to 2^32"
+        s_max_sze = 2**32
+    end if
 
     print *, "Calculating spectral densities for removed electrons in orbitals: "
 
@@ -214,7 +232,7 @@ BEGIN_PROVIDER [complex*16, greens_R, (greens_omega_N, n_iorb_R, ns_dets)]
         end if
     end do
 
-    if (n_iorb_R < 5) write(*,*)," "
+    if (modulo(n_iorb_R, 5) >0) write(*,*)," "
 
     print *, " with N dets of "
 
@@ -226,7 +244,7 @@ BEGIN_PROVIDER [complex*16, greens_R, (greens_omega_N, n_iorb_R, ns_dets)]
         end if
     end do
 
-    if (ns_dets < 5) write(*,*)," "
+    if (modulo(ns_dets, 5) > 0) write(*,*)," "
 
     do i_n_det = 1, ns_dets
 
@@ -362,14 +380,23 @@ BEGIN_PROVIDER [complex*16, greens_A_complex, (greens_omega_N, n_iorb_A,ns_dets)
     double precision        :: alpha(lanczos_N), beta(lanczos_N), epsilon, E0, norm, dznrm2, pi, t0, t1
     complex*16              :: z(greens_omega_N), zalpha(lanczos_N), bbeta(lanczos_N), cfraction_c
     integer                 :: i, iorb, nnz, i_n_det, N_det_l
-    integer*8               :: s_max_sze
+    integer(kind=8)               :: s_max_sze
     integer, allocatable    :: H_c(:), H_p(:), t_H_c(:)
     integer(bit_kind), allocatable :: det_excited(:,:,:)
     complex*16 , allocatable  ::  H_v(:), t_H_v(:), psi_coef_excited(:,:)
     character(len=72)       :: filename
 
     greens_A_complex = (0.d0, 0.d0)
-    s_max_sze = max_row_sze_factor*nnz_max_per_row
+    if (nnz_max_per_row > 0) then
+        s_max_sze = max_row_sze_factor*nnz_max_per_row
+    else 
+        s_max_sze = max_row_sze_factor*1000000 
+    end if
+
+    if (s_max_sze < 0) then
+        print *, "Desired max row size is hitting integer overflow. Setting max size to 2^32"
+        s_max_sze = 2**32
+    end if
 
     print *, "Calculating spectral densities for added electrons in orbitals: "
 
@@ -381,7 +408,7 @@ BEGIN_PROVIDER [complex*16, greens_A_complex, (greens_omega_N, n_iorb_A,ns_dets)
         end if
     end do
 
-    if (n_iorb_A < 5) write(*,*)," "
+    if (modulo(n_iorb_A, 5) >0) write(*,*)," "
 
     print *, " with N dets of "
 
@@ -393,7 +420,7 @@ BEGIN_PROVIDER [complex*16, greens_A_complex, (greens_omega_N, n_iorb_A,ns_dets)
         end if
     end do
 
-    if (ns_dets < 5) write(*,*)," "
+    if (modulo(ns_dets, 5) > 0) write(*,*)," "
 
 
     do i_n_det = 1, ns_dets
@@ -521,14 +548,23 @@ BEGIN_PROVIDER [complex*16, greens_R_complex, (greens_omega_N, n_iorb_R,ns_dets)
     double precision        :: alpha(lanczos_N), beta(lanczos_N), epsilon, E0, norm, dznrm2, pi, t0, t1
     complex*16              :: z(greens_omega_N), zalpha(lanczos_N), bbeta(lanczos_N), cfraction_c
     integer                 :: i, iorb, nnz, i_n_det, N_det_l
-    integer*8               :: s_max_sze
+    integer(kind=8)               :: s_max_sze
     integer, allocatable    :: H_c(:), H_p(:), t_H_c(:)
     integer(bit_kind), allocatable :: det_excited(:,:,:)
     complex*16 , allocatable  ::  H_v(:), t_H_v(:), psi_coef_excited(:,:)
     character(len=72)       :: filename
 
     greens_R_complex = (0.d0, 0.d0)
-    s_max_sze = max_row_sze_factor*nnz_max_per_row
+    if (nnz_max_per_row > 0) then
+        s_max_sze = max_row_sze_factor*nnz_max_per_row
+    else 
+        s_max_sze = max_row_sze_factor*1000000 
+    end if
+
+    if (s_max_sze < 0) then
+        print *, "Desired max row size is hitting integer overflow. Setting max size to 2^32"
+        s_max_sze = 2**32
+    end if
 
     print *, "Calculating spectral densities for removed electrons in orbitals: "
 
@@ -540,7 +576,7 @@ BEGIN_PROVIDER [complex*16, greens_R_complex, (greens_omega_N, n_iorb_R,ns_dets)
         end if
     end do
 
-    if (n_iorb_R < 5) write(*,*)," "
+    if (modulo(n_iorb_R, 5) >0) write(*,*)," "
 
     print *, " with N dets of "
 
@@ -552,7 +588,7 @@ BEGIN_PROVIDER [complex*16, greens_R_complex, (greens_omega_N, n_iorb_R,ns_dets)
         end if
     end do
 
-    if (ns_dets < 5) write(*,*)," "
+    if (modulo(ns_dets, 5) > 0) write(*,*)," "
 
     do i_n_det = 1, ns_dets
         N_det_l = n_det_sequence(i_n_det)
