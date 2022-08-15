@@ -448,6 +448,7 @@ BEGIN_PROVIDER [complex*16, greens_A_complex, (greens_omega_N, n_iorb_A,ns_dets)
                                 iorb_A(iorb), 1, .false., N_det_l)
 
             nnz = H_p(N_det_l+1)-1
+            print *, "last 5: ", H_p(N_det_l-3), H_p(N_det_l-2), H_p(N_det_l-1), H_p(N_det_l), H_p(N_det_l+1)
             
             allocate(t_H_c(nnz), t_H_v(nnz))
             t_H_c = H_c(:nnz)
@@ -457,6 +458,10 @@ BEGIN_PROVIDER [complex*16, greens_A_complex, (greens_omega_N, n_iorb_A,ns_dets)
 
             call wall_time(t1)
             write(*, "(A33, F8.2, A10)"), "Sparse Hamiltonian calculated in ", t1-t0, " seconds"
+            do i = 1, N_det_l
+                if (H_p(i) < 1) print *, i, H_p(i)
+                if (H_p(i) > nnz) print *, i, H_p(i)
+            end do
             call lanczos_tridiag_sparse_reortho_c(H_v, H_c, H_p, psi_coef_excited(:,1),&
                                         alpha, beta,&
                                         lanczos_N, nnz, N_det_l)
@@ -615,6 +620,7 @@ BEGIN_PROVIDER [complex*16, greens_R_complex, (greens_omega_N, n_iorb_R,ns_dets)
                                 iorb_R(iorb), 1, .true., N_det_l)
 
             nnz = H_p(N_det_l+1)-1
+            print *, "last 5: ", H_p(N_det_l-3), H_p(N_det_l-2), H_p(N_det_l-1), H_p(N_det_l), H_p(N_det_l+1)
             
             allocate(t_H_c(nnz), t_H_v(nnz))
             t_H_c = H_c(:nnz)
@@ -624,6 +630,12 @@ BEGIN_PROVIDER [complex*16, greens_R_complex, (greens_omega_N, n_iorb_R,ns_dets)
 
             call wall_time(t1)
             write(*, "(A33, F8.2, A10)"), "Sparse Hamiltonian calculated in ", t1-t0, " seconds"
+            do i = 1, N_det_l
+                if (H_p(i) < 1) print *, i, H_p(i)
+                if (H_p(i) > nnz) print *, i, H_p(i)
+            end do
+
+            
             call lanczos_tridiag_sparse_reortho_c(H_v, H_c, H_p, psi_coef_excited(:,1),&
                                         alpha, beta,&
                                         lanczos_N, nnz, N_det_l)

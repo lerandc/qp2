@@ -45,10 +45,15 @@ subroutine sparse_csr_dmv(A_v, A_c, A_p, x, y, sze, nnz)
     do i = 1, sze
         ! loop over columns
 
-        ! first entry per column is guaranteed to be diagonal since all diagonal
-        ! elements of H are nonzero
-        j = A_p(i)
-        y_t(i) = y_t(i) + A_v(j) * x(A_c(j))
+        
+        ! make sure row actually is in reduced determinant space
+        if (A_p(i+1) - A_p(i) > 0) then
+            ! calculate diagonal separately to avoid double counting
+            ! first entry per column is guaranteed to be diagonal since all diagonal
+            ! elements of H are nonzero
+            j = A_p(i)
+            y_t(i) = y_t(i) + A_v(j) * x(A_c(j))
+        end if
 
         do j = A_p(i)+1, A_p(i+1)-1
             ! calculate element of owned row
@@ -91,10 +96,15 @@ subroutine sparse_csr_zmv(A_v, A_c, A_p, x, y, sze, nnz)
     do i = 1, sze
         ! loop over columns
 
-        ! first entry per column is guaranteed to be diagonal since all diagonal
-        ! elements of H are nonzero
-        j = A_p(i)
-        y_t(i) = y_t(i) + A_v(j) * x(A_c(j))
+
+            ! make sure row actually is in reduced determinant space
+        if (A_p(i+1) - A_p(i) > 0) then
+            ! calculate diagonal separately to avoid double counting
+            ! first entry per column is guaranteed to be diagonal since all diagonal
+            ! elements of H are nonzero
+            j = A_p(i)
+            y_t(i) = y_t(i) + A_v(j) * x(A_c(j))
+        end if
 
         do j = A_p(i)+1, A_p(i+1)-1
             ! calculate element of owned row
