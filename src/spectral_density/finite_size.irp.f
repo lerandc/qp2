@@ -113,9 +113,7 @@ subroutine calc_dielectric_eps(d_eps)
     rho_k = (0.d0, 0.d0)
     do k = 1, kpt_num
         do i = 1, mo_num_per_kpt
-            do j = i, mo_num_per_kpt
-                rho_k(k) += one_e_dm_mo_kpts(i,j,k)
-            end do
+            rho_k(k) += one_e_dm_mo_kpts(i,i,k)
         end do
     end do
 
