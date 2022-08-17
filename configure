@@ -25,7 +25,7 @@ BSE_URL="https://github.com/MolSSI-BSE/basis_set_exchange/archive/v0.8.11.tar.gz
 F77ZMQ_URL="https://github.com/scemama/f77_zmq/archive/v4.2.5.tar.gz"
 GMP_URL="ftp://ftp.gnu.org/gnu/gmp/gmp-6.1.2.tar.bz2"
 IRPF90_URL="https://gitlab.com/scemama/irpf90/-/archive/v2.0.0/irpf90-v2.0.0.tar.gz"
-LIBCAP_URL="https://git.kernel.org/pub/scm/linux/kernel/git/morgan/libcap.git/snapshot/libcap-2.25.tar.gz"
+LIBCAP_URL="https://git.kernel.org/pub/scm/libs/libcap/libcap.git/snapshot/libcap-2.64.tar.gz"
 NINJA_URL="https://github.com/ninja-build/ninja/releases/download/v1.8.2/ninja-linux.zip"
 OCAML_URL="https://raw.githubusercontent.com/ocaml/opam/master/shell/install.sh"
 RESULTS_URL="https://gitlab.com/scemama/resultsFile/-/archive/v2.0/resultsFile-v2.0.tar.gz"
@@ -308,54 +308,14 @@ EOF
 
     elif [[ ${PACKAGE} = ocaml ]] ; then
 
-            download ${OCAML_URL} "${QP_ROOT}"/external/opam_installer.sh
-
-            if [[ -n ${TRAVIS} ]] ; then
-                # Special commands for Travis CI
-                chmod +x "${QP_ROOT}"/external/opam_installer.sh
-                rm --force ${QP_ROOT}/bin/opam
-                if [[ -n ${NO_CACHE} ]] ; then
-                        rm -rf ${HOME}/.opam
-                fi
-                export OPAMROOT=${HOME}/.opam
-                cat << EOF | bash ${QP_ROOT}/external/opam_installer.sh --no-backup
-${QP_ROOT}/bin
-
-
-
+	 execute <<EOF
+            source "${QP_ROOT}"/quantum_package.rc
+            cd "${QP_ROOT}"/external/
+            tar --gunzip --extract --file qp2-dependencies/ocaml-bundle_x86.tar.gz
+            echo "" | ./ocaml-bundle/bootstrap.sh "${QP_ROOT}"
+            ./ocaml-bundle/configure.sh "${QP_ROOT}"
+            echo "" | ./ocaml-bundle/compile.sh "${QP_ROOT}"
 EOF
-
-                rm ${QP_ROOT}/external/opam_installer.sh
-#                source ${OPAMROOT}/opam-init/init.sh > /dev/null 2> /dev/null || true
-#
-#                opam switch create ocaml-base-compiler.4.10.0
-                opam init --verbose --yes --compiler=4.10.0 --disable-sandboxing
-
-                eval $(opam env)
-                opam install -y ${OCAML_PACKAGES}  || exit 1
-
-            else
-                # Conventional commands
-                execute << EOF
-                  chmod +x "${QP_ROOT}"/external/opam_installer.sh
-                  "${QP_ROOT}"/external/opam_installer.sh --no-backup
-EOF
-                execute << EOF
-                  rm --force ${QP_ROOT}/bin/opam
-                  export OPAMROOT=${OPAMROOT:-${QP_ROOT}/external/opam}
-                  echo ${QP_ROOT}/bin \
-                  | sh ${QP_ROOT}/external/opam_installer.sh
-EOF
-                rm ${QP_ROOT}/external/opam_installer.sh
-#                source ${OPAMROOT}/opam-init/init.sh > /dev/null 2> /dev/null || true
-#                opam switch create ocaml-base-compiler.4.10.0     || exit 1
-
-                opam init --verbose --yes --compiler=4.10.0 --disable-sandboxing
-                eval $(opam env)
-                execute << EOF
-                  opam install -y \${OCAML_PACKAGES}  || exit 1
-EOF
-            fi
 
 
     elif [[ ${PACKAGE} = bse ]] ; then
