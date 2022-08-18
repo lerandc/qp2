@@ -1,7 +1,10 @@
 program spectral_density
     implicit none
     BEGIN_DOC
-    ! Program that calculates the spectral density.
+    ! Program that calculates the spectral density of a system.
+    ! Written by Luis Rangel DaCosta, 8-19-2022
+    ! Please check EZFIO.cfg for relevant varaibles to specify before running;
+    ! it is helpful to do so through Python.
     END_DOC
 
     logical                         :: force_reads
@@ -11,6 +14,7 @@ program spectral_density
     complex*16       , allocatable  :: psi_coef_complex_read(:,:)
     double precision :: tmp_eps
 
+    ! Force QP2 to read data from disk first
     read_wf = .true. 
     call ezfio_get_determinants_n_det(N_det_read)
     N_det = N_det_read
@@ -30,6 +34,7 @@ program spectral_density
         force_reads = size(psi_coef_complex, 1) == N_det_read .and.&
         size(psi_det, 3)  == N_det_read .and. read_wf
         if(force_reads) then
+
             ! PROVIDE one_e_dm_mo_kpts
             ! print *, rho_k
             ! print *, structure_factors

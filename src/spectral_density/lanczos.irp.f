@@ -7,10 +7,19 @@
 subroutine lanczos_tridiag_reortho_cb(H, u0, uu, alpha, beta, k, sze)
     implicit none
     BEGIN_DOC
-    ! Function that performs lanczos triadiaglonization of a hermitian matrix
+    ! Unit testing function -> test by checking sum(H - Q T Q^dagger)
+    ! Function that performs lanczos triadiaglonization of a complex, Hermitian matrix
     ! Performs reorthogonalization of intermediate vectors
+    ! See https://doi.org/10.1137/1.9781611971446, Chs. 6.6, 7.3, 7.4
     ! Outputs triadiagonlized Hermitian matrix as alpha and beta vectors
     ! Outputs up to k elements of tridiagonlization and orthogonal basis (testing only)
+
+    ! H is matrix to tridiagonalize
+    ! u0 is initial orthonormal vector
+    ! uu is orthonormal basis
+    ! alpha, beta are output tridiagonal coefficients
+    ! k is number of lanczos vectors to extract
+    ! sze is number of columns in matrix
     END_DOC
 
     integer, intent(in)             :: k, sze
@@ -39,10 +48,11 @@ subroutine lanczos_tridiag_reortho_cb(H, u0, uu, alpha, beta, k, sze)
             exit
         end if
 
+        ! Gram-Schmidt reorthogonalization
+        ! subtract out all previously extracted basis vectors from current vector
+        ! needed for numerical stability
         do ii = 1, 2 ! repeat process twice
             do j = 1, i
-                ! TODO: check to make sure that this loop can be done in this way, i.e., that the sum need not be completed before subtracting from z
-                ! in exact arithmetic, it is equivalent; does order matter for roundoff?
                 coef = zdotc(sze, z, incx, uu(:,j), incy)
                 z = z - coef * uu(:,j)
             enddo
@@ -63,10 +73,18 @@ end
 subroutine lanczos_tridiag_reortho_c(H, u0, alpha, beta, k, sze)
     implicit none
     BEGIN_DOC
-    ! Function that performs lanczos triadiaglonization of a hermitian matrix
+    ! Function that performs lanczos triadiaglonization of a dense, complex, Hermitian matrix
     ! Performs reorthogonalization of intermediate vectors
+    ! See https://doi.org/10.1137/1.9781611971446, Chs. 6.6, 7.3, 7.4
     ! Outputs triadiagonlized Hermitian matrix as alpha and beta vectors
     ! Outputs up to k elements of tridiagonlization
+
+    ! H is matrix to tridiagonalize
+    ! u0 is initial orthonormal vector
+    ! uu is orthonormal basis
+    ! alpha, beta are output tridiagonal coefficients
+    ! k is number of lanczos vectors to extract
+    ! sze is number of columns in matrix
     END_DOC
 
     integer, intent(in)             :: k, sze
@@ -94,6 +112,9 @@ subroutine lanczos_tridiag_reortho_c(H, u0, alpha, beta, k, sze)
             exit
         end if
 
+        ! Gram-Schmidt reorthogonalization
+        ! subtract out all previously extracted basis vectors from current vector
+        ! needed for numerical stability
         do ii = 1, 2 ! repeat process twice
             !$OMP PARALLEL PRIVATE(j, z_t, coef) SHARED(sze, incx, incy, uu, z)
             z_t = (0.d0, 0.d0)
@@ -125,10 +146,21 @@ end
 subroutine lanczos_tridiag_sparse_reortho_c(H_v, H_c, H_p, u0, alpha, beta, k, nnz, sze)
     implicit none
     BEGIN_DOC
-    ! Function that performs lanczos triadiaglonization of a hermitian matrix
+    ! Function that performs lanczos triadiaglonization of a sparse, complex, Hermitian matrix
     ! Performs reorthogonalization of intermediate vectors
+    ! See https://doi.org/10.1137/1.9781611971446, Chs. 6.6, 7.3, 7.4
     ! Outputs triadiagonlized Hermitian matrix as alpha and beta vectors
-    ! Outputs up to k elements of tridiagonlization
+    ! Outputs up to k elements of tridiagonlization and orthogonal basis (testing only)
+
+    ! Expects H in CSR format
+    ! H_v are non-zero values of H
+    ! H_c are column indices of H
+    ! H_p are the row pointers for H
+    ! u0 is initial orthonormal vector
+    ! uu is orthonormal basis
+    ! alpha, beta are output tridiagonal coefficients
+    ! k is number of lanczos vectors to extract
+    ! sze is number of columns in matrix
     END_DOC
 
     integer, intent(in)             :: k, sze, nnz, H_c(nnz), H_p(sze+1)
@@ -139,6 +171,7 @@ subroutine lanczos_tridiag_sparse_reortho_c(H_v, H_c, H_p, u0, alpha, beta, k, n
     double precision, intent(out)   :: beta(k), alpha(k)
     double precision                :: dznrm2, coef
     
+    ! prepare arrays
     allocate(uu(sze,k), z(sze))
     incx = 1 
     incy = 1
@@ -157,6 +190,9 @@ subroutine lanczos_tridiag_sparse_reortho_c(H_v, H_c, H_p, u0, alpha, beta, k, n
             exit
         end if
 
+        ! Gram-Schmidt reorthogonalization
+        ! subtract out all previously extracted basis vectors from current vector
+        ! needed for numerical stability
         do ii = 1, 2 ! repeat process twice
             !$OMP PARALLEL PRIVATE(j, z_t, coef) SHARED(sze, incx, incy, uu, z)
             allocate(z_t(sze))
@@ -198,10 +234,19 @@ end
 subroutine lanczos_tridiag_reortho_rb(H, u0, uu, alpha, beta, k, sze)
     implicit none
     BEGIN_DOC
-    ! Function that performs lanczos triadiaglonization of a hermitian matrix
+    ! Unit testing function -> test by checking sum(H - Q T Q^T)
+    ! Function that performs lanczos triadiaglonization of a real, symetric matrix
     ! Performs reorthogonalization of intermediate vectors
+    ! See https://doi.org/10.1137/1.9781611971446, Chs. 6.6, 7.3, 7.4
     ! Outputs triadiagonlized Hermitian matrix as alpha and beta vectors
     ! Outputs up to k elements of tridiagonlization and orthogonal basis (testing only)
+
+    ! H is matrix to tridiagonalize
+    ! u0 is initial orthonormal vector
+    ! uu is orthonormal basis
+    ! alpha, beta are output tridiagonal coefficients
+    ! k is number of lanczos vectors to extract
+    ! sze is number of columns in matrix
     END_DOC
 
     integer, intent(in)             :: k, sze
@@ -229,10 +274,11 @@ subroutine lanczos_tridiag_reortho_rb(H, u0, uu, alpha, beta, k, sze)
             exit
         end if
 
+        ! Gram-Schmidt reorthogonalization
+        ! subtract out all previously extracted basis vectors from current vector
+        ! needed for numerical stability
         do ii = 1, 2 ! repeat process twice
             do j = 1, i
-                ! TODO: check to make sure that this loop can be done in this way, i.e., that the sum need not be completed before subtracting from z
-                ! in exact arithmetic, it is equivalent; does order matter for roundoff?
                 coef = ddot(sze, z, incx, uu(:,j), incy)
                 z = z - coef * uu(:,j)
             enddo
@@ -253,10 +299,18 @@ end
 subroutine lanczos_tridiag_reortho_r(H, u0, alpha, beta, k, sze)
     implicit none
     BEGIN_DOC
-    ! Function that performs lanczos triadiaglonization of a hermitian matrix
+    ! Function that performs lanczos triadiaglonization of a dense, real, symmetric matrix
     ! Performs reorthogonalization of intermediate vectors
+    ! See https://doi.org/10.1137/1.9781611971446, Chs. 6.6, 7.3, 7.4
     ! Outputs triadiagonlized Hermitian matrix as alpha and beta vectors
     ! Outputs up to k elements of tridiagonlization
+
+    ! H is matrix to tridiagonalize
+    ! u0 is initial orthonormal vector
+    ! uu is orthonormal basis
+    ! alpha, beta are output tridiagonal coefficients
+    ! k is number of lanczos vectors to extract
+    ! sze is number of columns in matrix
     END_DOC
 
     integer, intent(in)             :: k, sze
@@ -284,6 +338,9 @@ subroutine lanczos_tridiag_reortho_r(H, u0, alpha, beta, k, sze)
             exit
         end if
 
+        ! Gram-Schmidt reorthogonalization
+        ! subtract out all previously extracted basis vectors from current vector
+        ! needed for numerical stability
         do ii = 1, 2 ! repeat process twice
             !$OMP PARALLEL PRIVATE(j, z_t, coef) SHARED(sze, incx, incy, uu, z)
             z_t = 0.d0
@@ -315,26 +372,35 @@ end
 subroutine lanczos_tridiag_sparse_reortho_r(H_v, H_c, H_p, u0, alpha, beta, k, nnz, sze)
     implicit none
     BEGIN_DOC
-    ! Function that performs lanczos triadiaglonization of a hermitian matrix
-    ! Uses CSR sparse H 
+    ! Function that performs lanczos triadiaglonization of a sparse, real, symmetric matrix
     ! Performs reorthogonalization of intermediate vectors
+    ! See https://doi.org/10.1137/1.9781611971446, Chs. 6.6, 7.3, 7.4
     ! Outputs triadiagonlized Hermitian matrix as alpha and beta vectors
-    ! Outputs up to k elements of tridiagonlization
+    ! Outputs up to k elements of tridiagonlization and orthogonal basis (testing only)
+
+    ! Expects H in CSR format
+    ! H_v are non-zero values of H
+    ! H_c are column indices of H
+    ! H_p are the row pointers for H
+    ! u0 is initial orthonormal vector
+    ! uu is orthonormal basis
+    ! alpha, beta are output tridiagonal coefficients
+    ! k is number of lanczos vectors to extract
+    ! sze is number of columns in matrix
     END_DOC
 
     integer, intent(in)             :: k, sze, nnz, H_c(nnz), H_p(sze+1)
     integer                         :: i, ii, j, incx, incy
     double precision, intent(in)    :: H_v(nnz), u0(sze)
-    ! double precision                :: z(sze), z_t(sze)! uu(sze,k)
     double precision, allocatable   :: uu(:,:), z(:), z_t(:)
     double precision, intent(out)   :: alpha(k), beta(k)
     double precision                :: ddot, coef
     double precision                :: dnrm2
     
+    ! prepare arrays
+    allocate(uu(sze,k), z(sze))
     incx = 1 
     incy = 1
-
-    allocate(uu(sze,k), z(sze))
 
     ! initialize vectors
     uu(:,1) = u0
@@ -350,6 +416,9 @@ subroutine lanczos_tridiag_sparse_reortho_r(H_v, H_c, H_p, u0, alpha, beta, k, n
             exit
         end if
         
+        ! Gram-Schmidt reorthogonalization
+        ! subtract out all previously extracted basis vectors from current vector
+        ! needed for numerical stability
         do ii = 1, 2 ! repeat process twice
             !$OMP PARALLEL PRIVATE(j, z_t, coef) SHARED(sze, incx, incy, uu, z)
             allocate(z_t(sze))

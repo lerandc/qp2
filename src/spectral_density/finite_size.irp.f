@@ -1,22 +1,6 @@
 ! modules for calculating relevant finite size corrections for 
 ! excited state properties calculated for solids
-
-
-
 ! following along Yang, et. al, Phys. Rev. B 101, 085115 (2020).
-! TODOs
-! 1) calculate the dielectric constant
-! needs:
-!   a) fourier transforms of electron density -> through one_e_dm_mo_kpts ?
-!   b) calculation of structure factors -> straight forward
-!   c) extraploation of structure factor bound to low k -> fit low k with QR factorization
-!
-! 2) calculate the Madelung constant
-! needs:
-!   a) set up of k-space grid
-!   b) integration of columb singularities over k-space grid
-! maybe this could be imported from pyscf?
-
 
 ! BEGIN_PROVIDER [complex*16, rho_k, (kpt_num)]
 !     implicit none
@@ -96,7 +80,6 @@
 subroutine calc_dielectric_eps(d_eps)
 
     implicit none
-    print *, "building dielectric"
 
     ! number of kpts probably on the lower end?
     ! should also adjust this to only take into account the smallest N kpts

@@ -36,7 +36,8 @@ BEGIN_PROVIDER [complex*16, greens_A, (greens_omega_N, n_iorb_A, ns_dets)]
     integer(bit_kind), allocatable :: det_excited(:,:,:)
     character(len=72)       :: filename
 
-    greens_A = (0.d0, 0.d0)
+    ! calculate the maximum size of the sparse arrays with some overflow protection
+    ! could still be much improved
     if (nnz_max_per_row > 0) then
         s_max_sze = max_row_sze_factor*nnz_max_per_row
     else 
@@ -47,9 +48,9 @@ BEGIN_PROVIDER [complex*16, greens_A, (greens_omega_N, n_iorb_A, ns_dets)]
         print *, "Desired max row size is hitting integer overflow. Setting max size to 2^32"
         s_max_sze = 2**32
     end if
-
+    
     print *, "Calculating spectral densities for added electrons in orbitals: "
-
+    
     do i = 1, n_iorb_A
         if (modulo(i, 5) == 0) then
             write(*, "(I6)"), iorb_A(i)
@@ -59,9 +60,9 @@ BEGIN_PROVIDER [complex*16, greens_A, (greens_omega_N, n_iorb_A, ns_dets)]
     end do
 
     if (modulo(n_iorb_A, 5) >0) write(*,*)," "
-
+    
     print *, " with N dets of "
-
+    
     do i = 1, ns_dets
         if (modulo(i, 5) == 0) then
             write(*, "(I10)"), n_det_sequence(i)
@@ -69,24 +70,29 @@ BEGIN_PROVIDER [complex*16, greens_A, (greens_omega_N, n_iorb_A, ns_dets)]
             write(*, "(I10)", advance="no"), n_det_sequence(i)
         end if
     end do
-
+    
     if (modulo(ns_dets,5) > 0) write(*,*)," "
+    
 
+    greens_A = (0.d0, 0.d0)
+    ! loop over number of determinants 
     do i_n_det = 1, ns_dets
-
+        
         N_det_l = n_det_sequence(i_n_det)
         allocate(psi_coef_excited(N_det_l, N_states), det_excited(N_int,2,N_det_l))
-
+        
+        ! loop over orbitals
         do iorb = 1, n_iorb_A
 
             write(*, "(A34, I6, A5, I11, A13)"),&
                 '#### Calculating density for iorb ', iorb_A(iorb),&
                 ' and ', N_det_l, ' determinants'
+
             ! reset bit masks
             call set_ref_bitmask(iorb_A(iorb), 1, .false.)
 
-            ! prepare input vector
-            ! add electron to LUMO
+            ! prepare orthonormal wavefunction in space of N+1 determinants
+            ! add electron to orbital
             call build_A_wavefunction(iorb_A(iorb),1,psi_coef_excited,det_excited,N_det_l)
             norm = dnrm2(N_det_l, psi_coef_excited(:,1), 1)
             psi_coef_excited = psi_coef_excited / norm
@@ -100,6 +106,7 @@ BEGIN_PROVIDER [complex*16, greens_A, (greens_omega_N, n_iorb_A, ns_dets)]
 
             nnz = H_p(N_det_l+1)-1
 
+            ! move vectors to smaller allocations
             allocate(t_H_c(nnz), t_H_v(nnz))
             t_H_c = H_c(:nnz)
             t_H_v = H_v(:nnz)
@@ -109,11 +116,14 @@ BEGIN_PROVIDER [complex*16, greens_A, (greens_omega_N, n_iorb_A, ns_dets)]
 
             call wall_time(t1)
             write(*, "(A33, F8.2, A10)"), "Sparse Hamiltonian calculated in ", t1-t0, " seconds"
+
+            ! calculate tridiagonalization of Hamiltoninan
             call lanczos_tridiag_sparse_reortho_r(H_v, H_c, H_p, psi_coef_excited(:,1),&
                                         alpha, beta,&
                                         lanczos_N, nnz, N_det_l)
 
             
+            ! prepare beta array for continued fractions
             bbeta(1) = (1.d0, 0.d0)
             do i = 2, lanczos_N
                 bbeta(i) = -1.d0*beta(i)**2.0
@@ -122,10 +132,11 @@ BEGIN_PROVIDER [complex*16, greens_A, (greens_omega_N, n_iorb_A, ns_dets)]
             lanczos_alpha_A(:, iorb, i_n_det) = alpha
             lanczos_beta_A(:, iorb, i_n_det) = real(bbeta)
 
-            epsilon = greens_epsilon ! small, a limit is taken here
+            epsilon = greens_epsilon ! broadening factor
             E0 = psi_energy(1)
             z = E0 + (greens_omega + (0.d0, 1.d0)*epsilon)
             
+            ! calculate greens functions
             !$OMP PARALLEL DO PRIVATE(i, zalpha) SHARED(alpha, bbeta, lanczos_N, greens_A)&
             !$OMP SCHEDULE(GUIDED)
             do i = 1, greens_omega_N
@@ -210,20 +221,21 @@ BEGIN_PROVIDER [complex*16, greens_R, (greens_omega_N, n_iorb_R, ns_dets)]
     integer(bit_kind), allocatable :: det_excited(:,:,:)
     character(len=72)       :: filename
 
-    greens_R = (0.d0, 0.d0)
+    ! calculate the maximum size of the sparse arrays with some overflow protection
+    ! could still be much improved
     if (nnz_max_per_row > 0) then
         s_max_sze = max_row_sze_factor*nnz_max_per_row
     else 
         s_max_sze = max_row_sze_factor*1000000 
     end if
-
+    
     if (s_max_sze < 0) then
         print *, "Desired max row size is hitting integer overflow. Setting max size to 2^32"
         s_max_sze = 2**32
     end if
-
+    
     print *, "Calculating spectral densities for removed electrons in orbitals: "
-
+    
     do i = 1, n_iorb_R
         if (modulo(i, 5) == 0) then
             write(*, "(I6)"), iorb_R(i)
@@ -231,11 +243,11 @@ BEGIN_PROVIDER [complex*16, greens_R, (greens_omega_N, n_iorb_R, ns_dets)]
             write(*, "(I6)", advance="no"), iorb_R(i)
         end if
     end do
-
+    
     if (modulo(n_iorb_R, 5) >0) write(*,*)," "
-
+    
     print *, " with N dets of "
-
+    
     do i = 1, ns_dets
         if (modulo(i, 5) == 0) then
             write(*, "(I10)"), n_det_sequence(i)
@@ -243,14 +255,17 @@ BEGIN_PROVIDER [complex*16, greens_R, (greens_omega_N, n_iorb_R, ns_dets)]
             write(*, "(I10)", advance="no"), n_det_sequence(i)
         end if
     end do
-
+    
     if (modulo(ns_dets, 5) > 0) write(*,*)," "
-
+    
+    greens_R = (0.d0, 0.d0)
+    ! loop over number of determinants 
     do i_n_det = 1, ns_dets
 
         N_det_l = n_det_sequence(i_n_det)
         allocate(psi_coef_excited(N_det_l, N_states), det_excited(N_int,2,N_det_l))
 
+        ! loop over orbitals
         do iorb = 1, n_iorb_R
 
             write(*, "(A34, I6, A5, I11, A13)"),&
@@ -260,8 +275,8 @@ BEGIN_PROVIDER [complex*16, greens_R, (greens_omega_N, n_iorb_R, ns_dets)]
             ! reset bit masks
             call set_ref_bitmask(iorb_R(iorb), 1, .true.)
 
-            ! prepare input vector
-            ! remove electron from HOMO
+            ! prepare orthonormal wavefunction in space of N-1 determinants
+            ! remove electron from orbital
             call build_R_wavefunction(iorb_R(iorb),1,psi_coef_excited,det_excited, N_det_l)
             norm = dnrm2(N_det_l, psi_coef_excited(:,1), 1)
             psi_coef_excited = psi_coef_excited / norm
@@ -274,6 +289,7 @@ BEGIN_PROVIDER [complex*16, greens_R, (greens_omega_N, n_iorb_R, ns_dets)]
 
             nnz = H_p(N_det_l+1)-1
 
+            ! move vectors to smaller allocations
             allocate(t_H_c(nnz), t_H_v(nnz))
             t_H_c = H_c(:nnz)
             t_H_v = H_v(:nnz)
@@ -283,10 +299,13 @@ BEGIN_PROVIDER [complex*16, greens_R, (greens_omega_N, n_iorb_R, ns_dets)]
 
             call wall_time(t1)
             write(*, "(A33, F8.2, A10)"), "Sparse Hamiltonian calculated in ", t1-t0, " seconds"
+
+            ! calculate tridiagonalization of Hamiltoninan
             call lanczos_tridiag_sparse_reortho_r(H_v, H_c, H_p, psi_coef_excited(:,1),&
                                             alpha, beta,&
                                             lanczos_N, nnz, N_det_l)
 
+            ! prepare beta array for continued fractions
             bbeta(1) = (1.d0, 0.d0)
             do i = 2, lanczos_N
                 bbeta(i) = -1.d0*beta(i)**2.0
@@ -295,10 +314,11 @@ BEGIN_PROVIDER [complex*16, greens_R, (greens_omega_N, n_iorb_R, ns_dets)]
             lanczos_alpha_R(:, iorb, i_n_det) = alpha
             lanczos_beta_R(:, iorb, i_n_det) = real(bbeta)
 
-            epsilon = greens_epsilon ! small, a limit is taken here
+            epsilon = greens_epsilon ! broadening factor
             E0 = psi_energy(1)
-            z = E0 - (-1.d0*greens_omega + (0.d0, 1.d0)*epsilon) ! omega is abs. energy value, hole part is only positive in negative energy range
+            z = E0 - (-1.d0*greens_omega + (0.d0, 1.d0)*epsilon) ! omega is abs. energy value
 
+            ! calculate greens functions
             !$OMP PARALLEL DO PRIVATE(i, zalpha) SHARED(alpha, bbeta, lanczos_N, greens_R)&
             !$OMP SCHEDULE(GUIDED)
             do i = 1, greens_omega_N
@@ -386,7 +406,8 @@ BEGIN_PROVIDER [complex*16, greens_A_complex, (greens_omega_N, n_iorb_A,ns_dets)
     complex*16 , allocatable  ::  H_v(:), t_H_v(:), psi_coef_excited(:,:)
     character(len=72)       :: filename
 
-    greens_A_complex = (0.d0, 0.d0)
+    ! calculate the maximum size of the sparse arrays with some overflow protection
+    ! could still be much improved
     if (nnz_max_per_row > 0) then
         s_max_sze = max_row_sze_factor*nnz_max_per_row
     else 
@@ -397,9 +418,9 @@ BEGIN_PROVIDER [complex*16, greens_A_complex, (greens_omega_N, n_iorb_A,ns_dets)
         print *, "Desired max row size is hitting integer overflow. Setting max size to 2^32"
         s_max_sze = 2**32
     end if
-
+    
     print *, "Calculating spectral densities for added electrons in orbitals: "
-
+    
     do i = 1, n_iorb_A
         if (modulo(i, 5) == 0) then
             write(*, "(I6)"), iorb_A(i)
@@ -407,11 +428,11 @@ BEGIN_PROVIDER [complex*16, greens_A_complex, (greens_omega_N, n_iorb_A,ns_dets)
             write(*, "(I6)", advance="no"), iorb_A(i)
         end if
     end do
-
+    
     if (modulo(n_iorb_A, 5) >0) write(*,*)," "
-
+    
     print *, " with N dets of "
-
+    
     do i = 1, ns_dets
         if (modulo(i, 5) == 0) then
             write(*, "(I10)"), n_det_sequence(i)
@@ -419,14 +440,17 @@ BEGIN_PROVIDER [complex*16, greens_A_complex, (greens_omega_N, n_iorb_A,ns_dets)
             write(*, "(I10)", advance="no"), n_det_sequence(i)
         end if
     end do
-
+    
     if (modulo(ns_dets, 5) > 0) write(*,*)," "
-
-
+    
+    
+    greens_A_complex = (0.d0, 0.d0)
+    ! loop over number of determinants 
     do i_n_det = 1, ns_dets
         N_det_l = n_det_sequence(i_n_det)
         allocate(psi_coef_excited(N_det_l, N_states), det_excited(N_int,2,N_det_l))
 
+        ! loop over orbitals
         do iorb = 1, n_iorb_A
 
             write(*, "(A34, I6, A5, I11, A13)"),&
@@ -435,8 +459,8 @@ BEGIN_PROVIDER [complex*16, greens_A_complex, (greens_omega_N, n_iorb_A,ns_dets)
 
             call set_ref_bitmask_complex(iorb_A(iorb), 1, .false.)
         
-            ! prepare input vector
-            ! add electron to LUMO
+            ! prepare orthonormal wavefunction in space of N+1 determinants
+            ! add electron to orbital
             call build_A_wavefunction_complex(iorb_A(iorb),1,psi_coef_excited,det_excited,N_det_l)
             norm = dznrm2(N_det_l, psi_coef_excited(:,1), 1)
             psi_coef_excited = psi_coef_excited / norm
@@ -448,8 +472,8 @@ BEGIN_PROVIDER [complex*16, greens_A_complex, (greens_omega_N, n_iorb_A,ns_dets)
                                 iorb_A(iorb), 1, .false., N_det_l)
 
             nnz = H_p(N_det_l+1)-1
-            print *, "last 5: ", H_p(N_det_l-3), H_p(N_det_l-2), H_p(N_det_l-1), H_p(N_det_l), H_p(N_det_l+1)
             
+            ! move vectors to smaller allocations
             allocate(t_H_c(nnz), t_H_v(nnz))
             t_H_c = H_c(:nnz)
             t_H_v = H_v(:nnz)
@@ -458,14 +482,13 @@ BEGIN_PROVIDER [complex*16, greens_A_complex, (greens_omega_N, n_iorb_A,ns_dets)
 
             call wall_time(t1)
             write(*, "(A33, F8.2, A10)"), "Sparse Hamiltonian calculated in ", t1-t0, " seconds"
-            do i = 1, N_det_l
-                if (H_p(i) < 1) print *, i, H_p(i)
-                if (H_p(i) > nnz) print *, i, H_p(i)
-            end do
+
+            ! calculate tridiagonalization of Hamiltoninan
             call lanczos_tridiag_sparse_reortho_c(H_v, H_c, H_p, psi_coef_excited(:,1),&
                                         alpha, beta,&
                                         lanczos_N, nnz, N_det_l)
 
+            ! prepare beta array for continued fractions
             bbeta(1) = (1.d0, 0.d0)
             do i = 2, lanczos_N
                 bbeta(i) = -1.d0*beta(i)**2.0
@@ -474,10 +497,11 @@ BEGIN_PROVIDER [complex*16, greens_A_complex, (greens_omega_N, n_iorb_A,ns_dets)
             lanczos_alpha_A_complex(:, iorb, i_n_det) = alpha
             lanczos_beta_A_complex(:, iorb, i_n_det) = real(bbeta)
 
-            epsilon = greens_epsilon ! small, a limit is taken here
+            epsilon = greens_epsilon ! boradening factor
             E0 = psi_energy(1)
             z = E0 + (greens_omega + (0.d0, 1.d0)*epsilon)
 
+            ! calculate greens functions
             !$OMP PARALLEL DO PRIVATE(i, zalpha) SHARED(alpha, bbeta, lanczos_N, greens_A_complex)&
             !$OMP SCHEDULE(GUIDED)
             do i = 1, greens_omega_N
@@ -559,7 +583,9 @@ BEGIN_PROVIDER [complex*16, greens_R_complex, (greens_omega_N, n_iorb_R,ns_dets)
     complex*16 , allocatable  ::  H_v(:), t_H_v(:), psi_coef_excited(:,:)
     character(len=72)       :: filename
 
-    greens_R_complex = (0.d0, 0.d0)
+
+    ! calculate the maximum size of the sparse arrays with some overflow protection
+    ! could still be much improved
     if (nnz_max_per_row > 0) then
         s_max_sze = max_row_sze_factor*nnz_max_per_row
     else 
@@ -572,7 +598,7 @@ BEGIN_PROVIDER [complex*16, greens_R_complex, (greens_omega_N, n_iorb_R,ns_dets)
     end if
 
     print *, "Calculating spectral densities for removed electrons in orbitals: "
-
+    
     do i = 1, n_iorb_R
         if (modulo(i, 5) == 0) then
             write(*, "(I6)"), iorb_R(i)
@@ -580,11 +606,11 @@ BEGIN_PROVIDER [complex*16, greens_R_complex, (greens_omega_N, n_iorb_R,ns_dets)
             write(*, "(I6)", advance="no"), iorb_R(i)
         end if
     end do
-
+    
     if (modulo(n_iorb_R, 5) >0) write(*,*)," "
-
+    
     print *, " with N dets of "
-
+    
     do i = 1, ns_dets
         if (modulo(i, 5) == 0) then
             write(*, "(I10)"), n_det_sequence(i)
@@ -592,13 +618,15 @@ BEGIN_PROVIDER [complex*16, greens_R_complex, (greens_omega_N, n_iorb_R,ns_dets)
             write(*, "(I10)", advance="no"), n_det_sequence(i)
         end if
     end do
-
+    
     if (modulo(ns_dets, 5) > 0) write(*,*)," "
-
+    
+    greens_R_complex = (0.d0, 0.d0)
     do i_n_det = 1, ns_dets
         N_det_l = n_det_sequence(i_n_det)
         allocate(psi_coef_excited(N_det_l, N_states), det_excited(N_int,2,N_det_l))
 
+        ! loop over orbitals
         do iorb = 1, n_iorb_R
 
             write(*, "(A34, I6, A5, I11, A13)"),&
@@ -607,8 +635,8 @@ BEGIN_PROVIDER [complex*16, greens_R_complex, (greens_omega_N, n_iorb_R,ns_dets)
 
             call set_ref_bitmask_complex(iorb_R(iorb), 1, .true.)
         
-            ! prepare input vector
-            ! remove electron from HOMO
+            ! prepare orthonormal wavefunction in space of N-1 determinants
+            ! remove electron from orbital
             call build_R_wavefunction_complex(iorb_R(iorb),1,psi_coef_excited,det_excited,N_det_l)
             norm = dznrm2(N_det_l, psi_coef_excited(:,1), 1)
             psi_coef_excited = psi_coef_excited / norm
@@ -620,8 +648,8 @@ BEGIN_PROVIDER [complex*16, greens_R_complex, (greens_omega_N, n_iorb_R,ns_dets)
                                 iorb_R(iorb), 1, .true., N_det_l)
 
             nnz = H_p(N_det_l+1)-1
-            print *, "last 5: ", H_p(N_det_l-3), H_p(N_det_l-2), H_p(N_det_l-1), H_p(N_det_l), H_p(N_det_l+1)
             
+            ! move vectors to smaller allocations
             allocate(t_H_c(nnz), t_H_v(nnz))
             t_H_c = H_c(:nnz)
             t_H_v = H_v(:nnz)
@@ -630,16 +658,13 @@ BEGIN_PROVIDER [complex*16, greens_R_complex, (greens_omega_N, n_iorb_R,ns_dets)
 
             call wall_time(t1)
             write(*, "(A33, F8.2, A10)"), "Sparse Hamiltonian calculated in ", t1-t0, " seconds"
-            do i = 1, N_det_l
-                if (H_p(i) < 1) print *, i, H_p(i)
-                if (H_p(i) > nnz) print *, i, H_p(i)
-            end do
 
-            
+            ! calculate tridiagonalization of Hamiltoninan
             call lanczos_tridiag_sparse_reortho_c(H_v, H_c, H_p, psi_coef_excited(:,1),&
                                         alpha, beta,&
                                         lanczos_N, nnz, N_det_l)
 
+            ! prepare beta array for continued fractions
             bbeta(1) = (1.d0, 0.d0)
             do i = 2, lanczos_N
                 bbeta(i) = -1.d0*beta(i)**2.0
@@ -650,8 +675,9 @@ BEGIN_PROVIDER [complex*16, greens_R_complex, (greens_omega_N, n_iorb_R,ns_dets)
 
             epsilon = greens_epsilon ! small, a limit is taken here
             E0 = psi_energy(1)
-            z = E0 - (-1.d0*greens_omega + (0.d0, 1.d0)*epsilon) ! omega is abs. energy value, hole part is only positive in negative energy range
+            z = E0 - (-1.d0*greens_omega + (0.d0, 1.d0)*epsilon) ! omega is abs. energy value
 
+            ! calculate greens functions
             !$OMP PARALLEL DO PRIVATE(i, zalpha) SHARED(alpha, bbeta, lanczos_N, greens_R_complex)&
             !$OMP SCHEDULE(GUIDED)
             do i = 1, greens_omega_N
@@ -921,7 +947,6 @@ subroutine get_phase_ca(det, iorb, ispin, phase)
     ! If we add a beta electron, the parity is affected by alpha part
     ! (need total number of occupied alpha orbs (all of which come before beta)
     ! and total number of beta occupied orbs below iorb)
-
     mask = 2**(iorb - 1) - 1
     k = shiftr(iorb-1,bit_kind_shift)+1
 
@@ -939,11 +964,11 @@ subroutine get_phase_ca(det, iorb, ispin, phase)
 end
 
 subroutine set_ref_bitmask(iorb, ispin, ac_type)
-    ! TODO: add complex implementation
-
     implicit none
     BEGIN_DOC
     ! Reset the bitmask and bitmask energy for added/removed electron
+    ! iorb is orbital index
+    ! ispin is spin of hole/particle
     ! ac_type == F if adding electron, T if removing
     END_DOC
 
@@ -1028,6 +1053,8 @@ subroutine set_ref_bitmask_complex(iorb, ispin, ac_type)
     implicit none
     BEGIN_DOC
     ! Reset the bitmask and bitmask energy for added/removed electron
+    ! iorb is orbital index
+    ! ispin is spin of hole/particle
     ! ac_type == F if adding electron, T if removing
     END_DOC
 
