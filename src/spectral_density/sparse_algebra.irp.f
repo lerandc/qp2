@@ -3,7 +3,7 @@ BEGIN_PROVIDER [integer, nnz_max_per_row]
 
     BEGIN_DOC
     ! Total possible number of entries in each column/row in full determinant space
-    ! Vastly overestimates actual number needed
+    ! Vastly overestimates actual number needed, but a useful base heuristic.
     END_DOC
     implicit none
 
@@ -28,6 +28,13 @@ subroutine sparse_csr_dmv(A_v, A_c, A_p, x, y, sze, nnz)
     BEGIN_DOC
     ! Compute the matrix vector product y = Ax with sparse A in CSR format
     ! Not general. Assumes A is sze x sze and symmetric; x, y are sze
+    !
+    ! A_v is matrix values
+    ! A_c is matrix column indices
+    ! A_p are the row pointers
+    ! x is an input vector of length sze
+    ! y is an output vector of length sze
+    ! nnz is the total number of nonzero entries in A
     END_DOC
 
     integer,          intent(in)  :: sze, nnz, A_c(nnz), A_p(sze+1)
@@ -36,15 +43,14 @@ subroutine sparse_csr_dmv(A_v, A_c, A_p, x, y, sze, nnz)
     double precision, allocatable :: y_t(:)
     integer                       :: i, j
 
-    ! loop over rows
     !$OMP PARALLEL PRIVATE(i, j, y_t) SHARED(y, x, A_c, A_p, A_v, sze)
     allocate(y_t(sze))
     y_t = 0.d0
     !$OMP BARRIER
+    ! loop over rows
     !$OMP DO SCHEDULE(GUIDED)
     do i = 1, sze
-        ! loop over columns
-
+        
         
         ! make sure row actually is in reduced determinant space
         if (A_p(i+1) - A_p(i) > 0) then
@@ -54,7 +60,8 @@ subroutine sparse_csr_dmv(A_v, A_c, A_p, x, y, sze, nnz)
             j = A_p(i)
             y_t(i) = y_t(i) + A_v(j) * x(A_c(j))
         end if
-
+        
+        ! loop over columns
         do j = A_p(i)+1, A_p(i+1)-1
             ! calculate element of owned row
             y_t(i) = y_t(i) + A_v(j) * x(A_c(j))
@@ -65,6 +72,7 @@ subroutine sparse_csr_dmv(A_v, A_c, A_p, x, y, sze, nnz)
     end do
     !$OMP END DO
 
+    ! perform reduction of final answer
     !$OMP CRITICAL
     y = y + y_t
     !$OMP END CRITICAL
@@ -86,18 +94,17 @@ subroutine sparse_csr_zmv(A_v, A_c, A_p, x, y, sze, nnz)
     complex*16,      allocatable  :: y_t(:)
     integer                       :: i, j
 
-    ! loop over rows
+    
     !$OMP PARALLEL PRIVATE(i, j, y_t) SHARED(y, x, A_c, A_p, A_v, sze)
-
     allocate(y_t(sze))
     y_t = (0.d0, 0.d0)
     !$OMP BARRIER
+    ! loop over rows
     !$OMP DO SCHEDULE(GUIDED)
     do i = 1, sze
-        ! loop over columns
-
-
-            ! make sure row actually is in reduced determinant space
+        
+        
+        ! make sure row actually is in reduced determinant space
         if (A_p(i+1) - A_p(i) > 0) then
             ! calculate diagonal separately to avoid double counting
             ! first entry per column is guaranteed to be diagonal since all diagonal
@@ -105,7 +112,8 @@ subroutine sparse_csr_zmv(A_v, A_c, A_p, x, y, sze, nnz)
             j = A_p(i)
             y_t(i) = y_t(i) + A_v(j) * x(A_c(j))
         end if
-
+        
+        ! loop over columns
         do j = A_p(i)+1, A_p(i+1)-1
             ! calculate element of owned row
             y_t(i) = y_t(i) + A_v(j) * x(A_c(j))
@@ -116,6 +124,7 @@ subroutine sparse_csr_zmv(A_v, A_c, A_p, x, y, sze, nnz)
     end do
     !$OMP END DO
 
+    ! perform reduction of final answer
     !$OMP CRITICAL
     y = y + y_t
     !$OMP END CRITICAL
@@ -125,12 +134,20 @@ subroutine sparse_csr_zmv(A_v, A_c, A_p, x, y, sze, nnz)
 end
 
 subroutine form_sparse_dH(csr_s, csr_c, csr_v, sze, dets, iorb, ispin, ac_type, N_det_l)
-    ! use MKL_SPBLAS
-
     implicit none
     BEGIN_DOC
     ! Form a compressed sparse row matrix representation of the Hamiltonian
-    ! in the space of the determinants
+    ! in the space of the determinants. For real Hamiltonians (molecules).
+
+    ! csr_s are the row pointers
+    ! csr_c are the column indices
+    ! csr_v are the matrix values
+    ! sze is the maximum possible number of nonzero entreis
+    ! dets are the determinants which form the space of the Hamiltonian
+    ! iorb is the oribital into which a hole/particle is being created
+    ! ispin is the spin of the hole/particle
+    ! ac_type is F for adding an electron, T if removing
+    ! N_det_l is the largest index of the determinants to include (when sorted by energy) 
     END_DOC
 
     integer, intent(in)           :: iorb, ispin, N_det_l
@@ -147,7 +164,6 @@ subroutine form_sparse_dH(csr_s, csr_c, csr_v, sze, dets, iorb, ispin, ac_type, 
     integer :: OMP_get_num_threads, OMP_get_thread_num
     integer, allocatable :: nnz_arr(:), coo_r(:), coo_c(:), l_cols(:)
     integer, allocatable :: coo_r_all(:), coo_c_all(:), coo_r_t(:), coo_c_t(:)
-    ! integer             :: coo_s(N_det_l), coo_n(N_det_l), coo_c_n(N_det_l), coo_c_n_all(N_det_l)
     integer, allocatable:: coo_s(:), coo_n(:)
     double precision     :: hij, frac
     double precision, allocatable :: coo_v(:), coo_v_t(:), coo_v_all(:)
@@ -168,6 +184,7 @@ subroutine form_sparse_dH(csr_s, csr_c, csr_v, sze, dets, iorb, ispin, ac_type, 
     !$OMP END SINGLE
     !$OMP BARRIER
 
+    ! initial allocation sizes for vectors
     frac = 0.2
     n_vals = max(nint(N_det_l*N_det_l*frac/n_threads), 128)
     n_vals_row = nnz_max_per_row
@@ -182,15 +199,14 @@ subroutine form_sparse_dH(csr_s, csr_c, csr_v, sze, dets, iorb, ispin, ac_type, 
     nnz_tot = 0
     !$OMP END SINGLE
     
-    ! !$OMP SINGLE
-    ! print *, "## Calculating nonzero entries"
-    ! !$OMP END SINGLE
-    
     nnz_cnt = 0
     !$OMP DO SCHEDULE(GUIDED)
     do i = 1, N_det ! this loop needs to go over all the determinants, since this loop is not in determiant order but rather k_a order
         nnz = 0
         l_cols = 0
+
+        ! check if row in N+1/N-1 determinant space
+        ! if so, grab all the indices of all nonzero columns for that row in the upper half of H
         call get_sparse_columns(i, l_cols, l_row, nnz, n_vals_row,&
                                  iorb, ispin, ac_type, N_det_l)
 
@@ -212,7 +228,8 @@ subroutine form_sparse_dH(csr_s, csr_c, csr_v, sze, dets, iorb, ispin, ac_type, 
         end if
         
         
-        coo_n(l_row) = nnz ! store for later
+        ! Calculate nonzero entries and temperorarily store in COO format
+        coo_n(l_row) = nnz ! store number of entries in row for later
         do j = 1, nnz
             nnz_cnt += 1
 
@@ -235,7 +252,6 @@ subroutine form_sparse_dH(csr_s, csr_c, csr_v, sze, dets, iorb, ispin, ac_type, 
     
     !$OMP SINGLE
     print *, "Total non-zero entries in Hamiltonian: ", nnz_tot, " max size:", sze
-    ! print *, "## Constructing pointer arrays"
     !$OMP END SINGLE
     
     !$OMP SINGLE
@@ -249,12 +265,13 @@ subroutine form_sparse_dH(csr_s, csr_c, csr_v, sze, dets, iorb, ispin, ac_type, 
         k += nnz_arr(i)
     end do
 
+    ! coo_*_all are in shared memory; since threads have disjoint work, this is safe
     coo_r_all(k+1:k+nnz_arr(ID)) = coo_r
     coo_c_all(k+1:k+nnz_arr(ID)) = coo_c
     coo_v_all(k+1:k+nnz_arr(ID)) = coo_v
     !$OMP BARRIER
 
-    ! calculate the starting index of each row in COO, since they were not sorted
+    ! calculate the starting index of each row in COO, since there is no sorting guarantee
     ! iterate over range, keep track of current row; if row changes, record the row start
     ii = (nnz_tot / n_threads)*(ID-1) + 1 ! start of range
     kk = (nnz_tot / n_threads) * ID + 3 ! end of range, slight overlap to catch boundary pointers
@@ -268,14 +285,14 @@ subroutine form_sparse_dH(csr_s, csr_c, csr_v, sze, dets, iorb, ispin, ac_type, 
         end if 
     end do
 
+    ! make sure first row in COO is accounted for
     !$OMP SINGLE
     coo_s(coo_r_all(1)) = 1
     !$OMP END SINGLE
 
     ! calculate CSR pointer ranges
     ! row i data goes from csr_s(i) to csr_s(i+1) - 1
-    ! first, count all entries in parallel, then perform scan to set pointer ranges
-    ! then reduce with inclsuive scan
+    ! use inclusive scan to reduce counts of rows in coo_n to set pointer ranges
 
     !$OMP SINGLE
     csr_s(1) = 1
@@ -295,11 +312,7 @@ subroutine form_sparse_dH(csr_s, csr_c, csr_v, sze, dets, iorb, ispin, ac_type, 
     !$OMP END SINGLE
     !$OMP BARRIER
 
-    ! !$OMP SINGLE
-    ! print *, "## Constructing CSR arrays"
-    ! !$OMP END SINGLE
-
-    ! loop through rows and construct CSR matrix
+    ! loop through rows and construct CSR matrix from COO temp arrays
     !$OMP DO SCHEDULE(GUIDED)
     do i = 1, N_det_l
         csr_v(csr_s(i):csr_s(i+1)-1) = coo_v_all(coo_s(i):coo_s(i+1)-1)
@@ -317,12 +330,20 @@ subroutine form_sparse_dH(csr_s, csr_c, csr_v, sze, dets, iorb, ispin, ac_type, 
 end
 
 subroutine form_sparse_zH(csr_s, csr_c, csr_v, sze, dets, iorb, ispin, ac_type, N_det_l)
-    ! use MKL_SPBLAS
-
     implicit none
     BEGIN_DOC
     ! Form a compressed sparse row matrix representation of the Hamiltonian
-    ! in the space of the determinants
+    ! in the space of the determinants. For real Hamiltonians (molecules).
+
+    ! csr_s are the row pointers
+    ! csr_c are the column indices
+    ! csr_v are the matrix values
+    ! sze is the maximum possible number of nonzero entreis
+    ! dets are the determinants which form the space of the Hamiltonian
+    ! iorb is the oribital into which a hole/particle is being created
+    ! ispin is the spin of the hole/particle
+    ! ac_type is F for adding an electron, T if removing
+    ! N_det_l is the largest index of the determinants to include (when sorted by energy) 
     END_DOC
 
     integer, intent(in)           :: iorb, ispin, N_det_l
@@ -339,7 +360,6 @@ subroutine form_sparse_zH(csr_s, csr_c, csr_v, sze, dets, iorb, ispin, ac_type, 
     integer :: OMP_get_num_threads, OMP_get_thread_num
     integer, allocatable :: nnz_arr(:), coo_r(:), coo_c(:), l_cols(:)
     integer, allocatable :: coo_r_all(:), coo_c_all(:), coo_r_t(:), coo_c_t(:)
-    ! integer             :: coo_s(N_det), coo_n(N_det), coo_c_n(N_det), coo_c_n_all(N_det)
     integer, allocatable:: coo_s(:), coo_n(:)
     double precision     :: frac
     complex*16           :: hij
@@ -362,6 +382,7 @@ subroutine form_sparse_zH(csr_s, csr_c, csr_v, sze, dets, iorb, ispin, ac_type, 
     !$OMP END SINGLE
     !$OMP BARRIER
 
+    ! initial allocation sizes for vectors
     frac = 0.2
     n_vals = max(nint(N_det_l*N_det_l*frac/n_threads), 128)
     n_vals_row = nnz_max_per_row
@@ -376,15 +397,14 @@ subroutine form_sparse_zH(csr_s, csr_c, csr_v, sze, dets, iorb, ispin, ac_type, 
     nnz_tot = 0
     !$OMP END SINGLE
     
-    ! !$OMP SINGLE
-    ! print *, "## Calculating nonzero entries"
-    ! !$OMP END SINGLE
-    
     nnz_cnt = 0
     !$OMP DO SCHEDULE(GUIDED)
     do i = 1, N_det ! this loop needs to go over all the determinants, since this loop is not in determiant order but rather k_a order
         nnz = 0
         l_cols = 0
+        
+        ! check if row in N+1/N-1 determinant space
+        ! if so, grab all the indices of all nonzero columns for that row in the upper half of H
         call get_sparse_columns(i, l_cols, l_row, nnz, n_vals_row,&
                                  iorb, ispin, ac_type, N_det_l)
 
@@ -406,7 +426,8 @@ subroutine form_sparse_zH(csr_s, csr_c, csr_v, sze, dets, iorb, ispin, ac_type, 
         end if
         
         
-        coo_n(l_row) = nnz ! store for later
+        ! Calculate nonzero entries and temperorarily store in COO format
+        coo_n(l_row) = nnz ! store number of entries in row for later
         do j = 1, nnz
             nnz_cnt += 1
 
@@ -428,8 +449,7 @@ subroutine form_sparse_zH(csr_s, csr_c, csr_v, sze, dets, iorb, ispin, ac_type, 
     !$OMP BARRIER
     
     !$OMP SINGLE
-    print *, "Total non-zero entries: ", nnz_tot, " max size:", sze
-    ! print *, "## Constructing pointer arrays"
+    print *, "Total non-zero entries in Hamiltonian: ", nnz_tot, " max size:", sze
     !$OMP END SINGLE
     
     !$OMP SINGLE
@@ -443,12 +463,13 @@ subroutine form_sparse_zH(csr_s, csr_c, csr_v, sze, dets, iorb, ispin, ac_type, 
         k += nnz_arr(i)
     end do
 
+    ! coo_*_all are in shared memory; since threads have disjoint work, this is safe
     coo_r_all(k+1:k+nnz_arr(ID)) = coo_r
     coo_c_all(k+1:k+nnz_arr(ID)) = coo_c
     coo_v_all(k+1:k+nnz_arr(ID)) = coo_v
     !$OMP BARRIER
 
-    ! calculate the starting index of each row in COO, since they were not sorted
+    ! calculate the starting index of each row in COO, since there is no sorting guarantee
     ! iterate over range, keep track of current row; if row changes, record the row start
     ii = (nnz_tot / n_threads)*(ID-1) + 1 ! start of range
     kk = (nnz_tot / n_threads) * ID + 3 ! end of range, slight overlap to catch boundary pointers
@@ -462,14 +483,14 @@ subroutine form_sparse_zH(csr_s, csr_c, csr_v, sze, dets, iorb, ispin, ac_type, 
         end if 
     end do
 
+    ! make sure first row in COO is accounted for
     !$OMP SINGLE
     coo_s(coo_r_all(1)) = 1
     !$OMP END SINGLE
 
     ! calculate CSR pointer ranges
     ! row i data goes from csr_s(i) to csr_s(i+1) - 1
-    ! first, count all entries in parallel, then perform scan to set pointer ranges
-    ! then reduce with inclsuive scan
+    ! use inclusive scan to reduce counts of rows in coo_n to set pointer ranges
 
     !$OMP SINGLE
     csr_s(1) = 1
@@ -489,11 +510,7 @@ subroutine form_sparse_zH(csr_s, csr_c, csr_v, sze, dets, iorb, ispin, ac_type, 
     !$OMP END SINGLE
     !$OMP BARRIER
 
-    ! !$OMP SINGLE
-    ! print *, "## Constructing CSR arrays"
-    ! !$OMP END SINGLE
-
-    ! loop through rows and construct CSR matrix
+    ! loop through rows and construct CSR matrix from COO temp arrays
     !$OMP DO SCHEDULE(GUIDED)
     do i = 1, N_det_l
         csr_v(csr_s(i):csr_s(i+1)-1) = coo_v_all(coo_s(i):coo_s(i+1)-1)
@@ -511,11 +528,20 @@ subroutine form_sparse_zH(csr_s, csr_c, csr_v, sze, dets, iorb, ispin, ac_type, 
 end
 
 subroutine get_sparse_columns(k_a, columns, row, nnz, nnz_max, iorb, ispin, ac_type, N_det_l)
-    ! this whole function should be within a parallel loop over N_det
-    ! the final output is the list of indices of off diagonal terms, sorted by column
-    ! for the thread in the mainloop to calculate the (non-zero) matrix elements H_i, j>i
-    ! for the hamiltonian in the space of the set of determinants
+    BEGIN_DOC
+    ! Find all nonzero column indices belonging to row k_a in the bilinear matrix ordering
+    !
+    ! k_a is current row index, in bilinear matrix order
+    ! columns are the columns belong to to k_a
+    ! row is the index in the energy ordering corresponding to k_a
+    ! nnz is the number of entries in columns
+    ! nnz_max is the maximum number of entries allowed in column
+    ! iorb is the orbital into which a hole/particle is created
+    ! ispin is the spin of the hole/particle
     ! ac_type == F if adding electron, T if removing
+    ! N_det_l is the largest index of the determinants to include (when sorted by energy) 
+    END_DOC
+
     implicit none
 
     integer, intent(in)      :: k_a, nnz_max, iorb, ispin, N_det_l
@@ -535,6 +561,8 @@ subroutine get_sparse_columns(k_a, columns, row, nnz, nnz_max, iorb, ispin, ac_t
     integer, allocatable              :: doubles_aa(:), doubles_bb(:), doubles_ab(:)
     integer, allocatable              :: idx(:), all_idx(:), srt_idx(:)
     
+
+    ! initialize arrays
     allocate(buffer(N_int, N_det_l), idx(N_det_l))
 
     n_singles_a = 0
@@ -543,15 +571,18 @@ subroutine get_sparse_columns(k_a, columns, row, nnz, nnz_max, iorb, ispin, ac_t
     n_doubles_ab = 0
     n_doubles_bb = 0
     
+    ! store index and make sure it isn't out of range of the reduced determinant space
     kidx = psi_bilinear_matrix_order(k_a)
 
     if (kidx > N_det_l) return ! determinant not included in this subset
 
+    ! get pointer indices and a ref determinant
     krow = psi_bilinear_matrix_rows(k_a)
     kcol = psi_bilinear_matrix_columns(k_a)
     ref_det(:,1) = psi_det_alpha_unique(:, krow)
     ref_det(:,2) = psi_det_beta_unique (:, kcol)
 
+    ! check if determinant can accept excitation; if not, leave
     call orb_is_filled(ref_det, iorb, ispin, N_int, is_filled)
     if (is_filled .neqv. ac_type) return 
     
@@ -561,8 +592,8 @@ subroutine get_sparse_columns(k_a, columns, row, nnz, nnz_max, iorb, ispin, ac_t
     do i = psi_bilinear_matrix_columns_loc(kcol), psi_bilinear_matrix_columns_loc(kcol+1)-1
         lidx = psi_bilinear_matrix_order(i)
         
+        ! check if determinant is in upper half of reduced Hamiltonian matrix
         if ((lidx <= kidx) .or. (lidx > N_det_l)) cycle
-        ! if (lidx > N_det_l) cycle
 
         lcol = psi_bilinear_matrix_columns(i)
         lrow = psi_bilinear_matrix_rows(i)
@@ -570,6 +601,7 @@ subroutine get_sparse_columns(k_a, columns, row, nnz, nnz_max, iorb, ispin, ac_t
         tmp_det(:,1) = psi_det_alpha_unique(:, lrow)
         tmp_det(:,2) = psi_det_beta_unique (:, lcol)
 
+        ! check if determinant can accept hole/particle
         call orb_is_filled(tmp_det, iorb, ispin, N_int, is_filled)
 
         if (is_filled .neqv. ac_type) cycle 
@@ -583,6 +615,7 @@ subroutine get_sparse_columns(k_a, columns, row, nnz, nnz_max, iorb, ispin, ac_t
 
     allocate(singles_a(n_buffer), doubles_aa(n_buffer))
 
+    ! grab indices of all determinants in buffer related to ref_det by (1,0) or (2,0) excitations 
     sdet_a = ref_det(:,1)
     call get_all_spin_singles_and_doubles(buffer, idx, sdet_a, &
                         N_int, n_buffer, singles_a, doubles_aa, n_singles_a, n_doubles_aa)
@@ -590,7 +623,6 @@ subroutine get_sparse_columns(k_a, columns, row, nnz, nnz_max, iorb, ispin, ac_t
     deallocate(buffer, idx)
     allocate(buffer(N_int, N_det), idx(N_det))
 
-    ! print *, "Getting beta singles/doubles"
     ! Finding (0,1) and (0,2) excitations 
     k_b = psi_bilinear_matrix_order_transp_reverse(k_a)
     krow = psi_bilinear_matrix_transp_rows(k_b) !this is unnecessary, technically
@@ -602,8 +634,8 @@ subroutine get_sparse_columns(k_a, columns, row, nnz, nnz_max, iorb, ispin, ac_t
         tidx = psi_bilinear_matrix_transp_order(i)
         lidx = psi_bilinear_matrix_order(tidx)
 
+        ! check if determinant is in upper half of reduced Hamiltonian matrix
         if ((lidx <= kidx) .or. (lidx > N_det_l)) cycle
-        ! if (lidx > N_det_l) cycle
         
         lcol = psi_bilinear_matrix_transp_columns(i)
         lrow = psi_bilinear_matrix_transp_rows(i)
@@ -611,6 +643,7 @@ subroutine get_sparse_columns(k_a, columns, row, nnz, nnz_max, iorb, ispin, ac_t
         tmp_det(:,1) = psi_det_alpha_unique(:, lrow)
         tmp_det(:,2) = psi_det_beta_unique (:, lcol)
 
+        ! check if determinant can accept hole/particle
         call orb_is_filled(tmp_det, iorb, ispin, N_int, is_filled)
 
         if (is_filled .neqv. ac_type) cycle 
@@ -623,13 +656,14 @@ subroutine get_sparse_columns(k_a, columns, row, nnz, nnz_max, iorb, ispin, ac_t
     end do
     
     allocate(singles_b(n_buffer), doubles_bb(n_buffer))
+
+    ! grab indices of all determinants in buffer related to ref_det by (0,1) or (0,2) excitations 
     sdet_b = ref_det(:,2)
     call get_all_spin_singles_and_doubles(buffer, idx, sdet_b, &
                         N_int, n_buffer, singles_b, doubles_bb, n_singles_b, n_doubles_bb)
                         
     deallocate(buffer, idx)
 
-    ! print *, "Getting alpha beta doubles"
     ! Finding (1,1) excitations
     allocate(buffer(N_int, N_det), idx(N_det))
     allocate(doubles_ab(N_det))
@@ -638,6 +672,9 @@ subroutine get_sparse_columns(k_a, columns, row, nnz, nnz_max, iorb, ispin, ac_t
     n_buffer_old = 0
     n_doubles_ab_tot = 0
 
+    ! starting from list of beta singles does not give all the (1,1) excitations
+    ! so we need to search over either all beta or all alpha at some point
+    ! TODO: perhaps better to change outer loop to alpha, since we always excite in alpha channel? would it be significantly different?
     ! start from (0,1) to excite to (1,1)
     do j = 1, n_det_beta_unique
 
@@ -659,8 +696,8 @@ subroutine get_sparse_columns(k_a, columns, row, nnz, nnz_max, iorb, ispin, ac_t
         do i = psi_bilinear_matrix_columns_loc(j), psi_bilinear_matrix_columns_loc(j+1)-1
             lidx = psi_bilinear_matrix_order(i)
 
+            ! check if determinant is in upper half of reduced Hamiltonian matrix
             if ((lidx <= kidx) .or. (lidx > N_det_l)) cycle
-            ! if (lidx > N_det_l) cycle
 
             lcol = psi_bilinear_matrix_columns(i)
             lrow = psi_bilinear_matrix_rows(i)
@@ -668,6 +705,7 @@ subroutine get_sparse_columns(k_a, columns, row, nnz, nnz_max, iorb, ispin, ac_t
             tmp_det(:,1) = psi_det_alpha_unique(:, lrow)
             tmp_det(:,2) = psi_det_beta_unique (:, lcol)
 
+            ! check if determinant can accept hole/particle
             call orb_is_filled(tmp_det, iorb, ispin, N_int, is_filled)
 
             if (is_filled .neqv. ac_type) cycle 
@@ -680,6 +718,10 @@ subroutine get_sparse_columns(k_a, columns, row, nnz, nnz_max, iorb, ispin, ac_t
         end do
 
         sdet_a = ref_det(:,1)
+
+        ! all determinants are (X,1) excitations from ref_det
+        ! so we just need to check alpha channel now
+        ! grab indices of all determinants in buffer related to ref_det by (1,1) excitations 
         call get_all_spin_singles(buffer(:,n_buffer_old+1:n_buffer), idx(n_buffer_old+1:n_buffer),&
                                 sdet_a, N_int, n_buffer-n_buffer_old,&
                                 doubles_ab(n_doubles_ab_tot+1:n_doubles_ab_tot+n_buffer-n_buffer_old),&
