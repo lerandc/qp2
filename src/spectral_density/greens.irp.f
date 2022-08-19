@@ -29,9 +29,9 @@ BEGIN_PROVIDER [complex*16, greens_A, (greens_omega_N, n_iorb_A, ns_dets)]
     double precision        :: E0, norm, dnrm2, pi
     double precision        :: t0, t1
     complex*16              :: z(greens_omega_N), zalpha(lanczos_N), bbeta(lanczos_N), cfraction_c
-    integer                 :: i, iorb, nnz, i_n_det, N_det_l
+    integer                 :: i, iorb, nnz, nnz_l, i_n_det, N_det_l
     integer(kind=8)              :: s_max_sze
-    integer, allocatable    :: H_c(:), t_H_c(:), H_p(:)
+    integer, allocatable    :: H_c(:), t_H_c(:), H_p(:), H_c_all(:), H_p_all(:), I_k(:)
     double precision, allocatable  ::  H_v(:), t_H_v(:), psi_coef_excited(:,:)
     integer(bit_kind), allocatable :: det_excited(:,:,:)
     character(len=72)       :: filename
@@ -80,7 +80,22 @@ BEGIN_PROVIDER [complex*16, greens_A, (greens_omega_N, n_iorb_A, ns_dets)]
         
         N_det_l = n_det_sequence(i_n_det)
         allocate(psi_coef_excited(N_det_l, N_states), det_excited(N_int,2,N_det_l))
+
+        ! Calculate full sparsity structure for N_det_l
+        call wall_time(t0)
+        allocate(H_c_all(s_max_sze), H_p_all(N_det_l+1), I_k(N_det_l))
+        call get_sparsity_structure(H_p_all, H_c_all, s_max_sze, N_det_l)
         
+        nnz = H_p_all(N_det_l+1)-1
+
+        ! move vectors to smaller allocations
+        allocate(t_H_c(nnz))
+        t_H_c = H_c_all(:nnz)
+        call move_alloc(t_H_c, H_c_all)
+
+        call wall_time(t1)
+        write(*, "(A33, F8.2, A10)"), "Sparsity structure calculated in ", t1-t0, " seconds"
+
         ! loop over orbitals
         do iorb = 1, n_iorb_A
 
@@ -93,35 +108,37 @@ BEGIN_PROVIDER [complex*16, greens_A, (greens_omega_N, n_iorb_A, ns_dets)]
 
             ! prepare orthonormal wavefunction in space of N+1 determinants
             ! add electron to orbital
-            call build_A_wavefunction(iorb_A(iorb),1,psi_coef_excited,det_excited,N_det_l)
+            call build_A_wavefunction(iorb_A(iorb),1,psi_coef_excited,det_excited,N_det_l,I_k)
             norm = dnrm2(N_det_l, psi_coef_excited(:,1), 1)
             psi_coef_excited = psi_coef_excited / norm
 
             ! prepare sparse Hamiltonian arrays
             call wall_time(t0)
-            allocate(H_c(s_max_sze), H_v(s_max_sze), H_p(N_det_l+1))
-            call form_sparse_dH(H_p, H_c, H_v, s_max_sze, det_excited,&
-                                iorb_A(iorb), 1, .false., N_det_l)
-            
+            allocate(H_c(nnz), H_p(N_det_l+1))
 
-            nnz = H_p(N_det_l+1)-1
+            call sparse_csr_MM(H_c_all,H_p_all, I_k, H_c, H_p, N_det_l, nnz)
+
+            nnz_l = H_p(N_det_l+1)-1
 
             ! move vectors to smaller allocations
-            allocate(t_H_c(nnz), t_H_v(nnz))
-            t_H_c = H_c(:nnz)
-            t_H_v = H_v(:nnz)
-
+            allocate(t_H_c(nnz_l), H_v(nnz_l))
+            t_H_c = H_c(:nnz_l)
             call move_alloc(t_H_c, H_c)
-            call move_alloc(t_H_v, H_v)
+
+            call calc_sparse_dH(H_p, H_c, H_v, N_det_l, nnz_l, det_excited)
+            ! call form_sparse_dH(H_p, H_c, H_v, s_max_sze, det_excited,&
+            !                     iorb_A(iorb), 1, .false., N_det_l)
 
             call wall_time(t1)
             write(*, "(A33, F8.2, A10)"), "Sparse Hamiltonian calculated in ", t1-t0, " seconds"
 
+            call wall_time(t0)
             ! calculate tridiagonalization of Hamiltoninan
             call lanczos_tridiag_sparse_reortho_r(H_v, H_c, H_p, psi_coef_excited(:,1),&
                                         alpha, beta,&
-                                        lanczos_N, nnz, N_det_l)
-
+                                        lanczos_N, nnz_l, N_det_l)
+            call wall_time(t1)
+            write(*, "(A21, F8.2, A10)"), "Lanczos iteration in ", t1-t0, " seconds"
             
             ! prepare beta array for continued fractions
             bbeta(1) = (1.d0, 0.d0)
@@ -199,7 +216,7 @@ BEGIN_PROVIDER [complex*16, greens_A, (greens_omega_N, n_iorb_A, ns_dets)]
             call print_memory_usage()
         end do
 
-        deallocate(psi_coef_excited, det_excited)
+        deallocate(psi_coef_excited, det_excited, H_c_all, H_p_all, I_k)
     end do
 
 END_PROVIDER
@@ -213,11 +230,10 @@ BEGIN_PROVIDER [complex*16, greens_R, (greens_omega_N, n_iorb_R, ns_dets)]
     double precision        :: E0, norm, dnrm2, pi
     double precision        :: t0, t1
     complex*16              :: z(greens_omega_N), zalpha(lanczos_N), bbeta(lanczos_N), cfraction_c
-    integer                 :: i, iorb, nnz, i_n_det, N_det_l
+    integer                 :: i, iorb, nnz, nnz_l, i_n_det, N_det_l
     integer(kind=8)               :: s_max_sze
-    integer, allocatable    :: H_c(:), H_p(:), t_H_c(:)
-    double precision , allocatable  ::  H_v(:), t_H_v(:)
-    double precision, allocatable  :: psi_coef_excited(:,:) 
+    integer, allocatable    :: H_c(:), H_p(:), t_H_c(:), H_c_all(:), H_p_all(:), I_k(:)
+    double precision , allocatable ::  H_v(:), t_H_v(:), psi_coef_excited(:,:) 
     integer(bit_kind), allocatable :: det_excited(:,:,:)
     character(len=72)       :: filename
 
@@ -265,6 +281,22 @@ BEGIN_PROVIDER [complex*16, greens_R, (greens_omega_N, n_iorb_R, ns_dets)]
         N_det_l = n_det_sequence(i_n_det)
         allocate(psi_coef_excited(N_det_l, N_states), det_excited(N_int,2,N_det_l))
 
+
+        ! Calculate full sparsity structure for N_det_l
+        call wall_time(t0)
+        allocate(H_c_all(s_max_sze), H_p_all(N_det_l+1), I_k(N_det_l))
+        call get_sparsity_structure(H_p_all, H_c_all, s_max_sze, N_det_l)
+        
+        nnz = H_p_all(N_det_l+1)-1
+
+        ! move vectors to smaller allocations
+        allocate(t_H_c(nnz))
+        t_H_c = H_c_all(:nnz)
+        call move_alloc(t_H_c, H_c_all)
+
+        call wall_time(t1)
+        write(*, "(A33, F8.2, A10)"), "Sparsity structure calculated in ", t1-t0, " seconds"
+
         ! loop over orbitals
         do iorb = 1, n_iorb_R
 
@@ -277,34 +309,38 @@ BEGIN_PROVIDER [complex*16, greens_R, (greens_omega_N, n_iorb_R, ns_dets)]
 
             ! prepare orthonormal wavefunction in space of N-1 determinants
             ! remove electron from orbital
-            call build_R_wavefunction(iorb_R(iorb),1,psi_coef_excited,det_excited, N_det_l)
+            call build_R_wavefunction(iorb_R(iorb),1,psi_coef_excited,det_excited, N_det_l, I_k)
             norm = dnrm2(N_det_l, psi_coef_excited(:,1), 1)
             psi_coef_excited = psi_coef_excited / norm
 
             ! prepare sparse Hamiltonian arrays
             call wall_time(t0)
-            allocate(H_c(s_max_sze), H_v(s_max_sze), H_p(N_det_l+1))
-            call form_sparse_dH(H_p, H_c, H_v, s_max_sze, det_excited,&
-                                iorb_R(iorb), 1, .true., N_det_l)
+            allocate(H_c(nnz), H_p(N_det_l+1))
 
-            nnz = H_p(N_det_l+1)-1
+            call sparse_csr_MM(H_c_all,H_p_all, I_k, H_c, H_p, N_det_l, nnz)
+
+            nnz_l = H_p(N_det_l+1)-1
 
             ! move vectors to smaller allocations
-            allocate(t_H_c(nnz), t_H_v(nnz))
-            t_H_c = H_c(:nnz)
-            t_H_v = H_v(:nnz)
-
+            allocate(t_H_c(nnz_l), H_v(nnz_l))
+            t_H_c = H_c(:nnz_l)
             call move_alloc(t_H_c, H_c)
-            call move_alloc(t_H_v, H_v)
+
+            call calc_sparse_dH(H_p, H_c, H_v, N_det_l, nnz_l, det_excited)
+            ! call form_sparse_dH(H_p, H_c, H_v, s_max_sze, det_excited,&
+            !                     iorb_R(iorb), 1, .true., N_det_l)
 
             call wall_time(t1)
             write(*, "(A33, F8.2, A10)"), "Sparse Hamiltonian calculated in ", t1-t0, " seconds"
 
+            call wall_time(t0)
             ! calculate tridiagonalization of Hamiltoninan
             call lanczos_tridiag_sparse_reortho_r(H_v, H_c, H_p, psi_coef_excited(:,1),&
                                             alpha, beta,&
                                             lanczos_N, nnz, N_det_l)
 
+            call wall_time(t1)
+            write(*, "(A21, F8.2, A10)"), "Lanczos iteration in ", t1-t0, " seconds"
             ! prepare beta array for continued fractions
             bbeta(1) = (1.d0, 0.d0)
             do i = 2, lanczos_N
@@ -381,7 +417,7 @@ BEGIN_PROVIDER [complex*16, greens_R, (greens_omega_N, n_iorb_R, ns_dets)]
             call print_memory_usage()
         end do
 
-        deallocate(psi_coef_excited, det_excited)
+        deallocate(psi_coef_excited, det_excited, H_c_all, H_p_all, I_k)
     end do
 
 END_PROVIDER
@@ -753,19 +789,22 @@ END_PROVIDER
 
 
 !! reduced versions of excitation routines below
-subroutine build_A_wavefunction(i_particle, ispin, coef_out, det_out, N_det_l)
+subroutine build_A_wavefunction(i_particle, ispin, coef_out, det_out, N_det_l, I_k)
     implicit none
     BEGIN_DOC
     ! Applies the creation operator : a^{dager}_(i_particle) of
     ! spin = ispin to the current wave function (psi_det, psi_coef)
     END_DOC
     integer, intent(in)            :: i_particle,ispin,N_det_l
+    integer, intent(out)           :: I_k(N_det_l)
     integer(bit_kind), intent(out) :: det_out(N_int,2,N_det_l)
     double precision, intent(out)  :: coef_out(N_det_l,N_states)
   
     integer :: k
     integer :: i_ok
     double precision :: phase
+
+    I_k = 0
     do k=1,N_det_l
       coef_out(k,:) = psi_coef(k,:)
       det_out(:,:,k) = psi_det(:,:,k)
@@ -773,6 +812,7 @@ subroutine build_A_wavefunction(i_particle, ispin, coef_out, det_out, N_det_l)
       if (i_ok == 1) then
         call get_phase_ca(psi_det(:,:,k),i_particle,ispin,phase)
         coef_out(k,:) = phase * coef_out(k,:)
+        I_k(k) = 1
       else
         coef_out(k,:) = 0.d0
         det_out(:,:,k) = psi_det(:,:,k)
@@ -780,19 +820,22 @@ subroutine build_A_wavefunction(i_particle, ispin, coef_out, det_out, N_det_l)
     enddo
 end
 
-subroutine build_R_wavefunction(i_hole, ispin, coef_out, det_out, N_det_l)
+subroutine build_R_wavefunction(i_hole, ispin, coef_out, det_out, N_det_l, I_k)
     implicit none
     BEGIN_DOC
     ! Applies the annihilation operator: a_(i_hole) of
     ! spin = ispin to the current wave function (psi_det, psi_coef)
     END_DOC
     integer, intent(in)            :: i_hole,ispin,N_det_l
+    integer, intent(out)           :: I_k(N_det_l)
     integer(bit_kind), intent(out) :: det_out(N_int,2,N_det_l)
     double precision, intent(out)  :: coef_out(N_det_l,N_states)
   
     integer :: k
     integer :: i_ok
     double precision :: phase
+
+    I_k = 0
     do k=1,N_det_l
       coef_out(k,:) = psi_coef(k,:)
       det_out(:,:,k) = psi_det(:,:,k)
@@ -800,6 +843,7 @@ subroutine build_R_wavefunction(i_hole, ispin, coef_out, det_out, N_det_l)
       if (i_ok == 1) then
         call get_phase_ca(psi_det(:,:,k),i_hole,ispin,phase)
         coef_out(k,:) = phase * coef_out(k,:)
+        I_k(k) = 1
       else
         coef_out(k,:) = 0.d0
         det_out(:,:,k) = psi_det(:,:,k)
