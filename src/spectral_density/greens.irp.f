@@ -116,6 +116,7 @@ BEGIN_PROVIDER [complex*16, greens_A, (greens_omega_N, n_iorb_A, ns_dets)]
             call wall_time(t0)
             allocate(H_c(nnz), H_p(N_det_l+1))
 
+            ! reduce sparse Hamiltonian to set of valid determinants for this excitation
             call sparse_csr_MM(H_c_all,H_p_all, I_k, H_c, H_p, N_det_l, nnz)
 
             nnz_l = H_p(N_det_l+1)-1
@@ -125,6 +126,7 @@ BEGIN_PROVIDER [complex*16, greens_A, (greens_omega_N, n_iorb_A, ns_dets)]
             t_H_c = H_c(:nnz_l)
             call move_alloc(t_H_c, H_c)
 
+            ! calculate entries of Hamiltonian
             call calc_sparse_dH(H_p, H_c, H_v, N_det_l, nnz_l, det_excited)
             ! call form_sparse_dH(H_p, H_c, H_v, s_max_sze, det_excited,&
             !                     iorb_A(iorb), 1, .false., N_det_l)
@@ -316,6 +318,7 @@ BEGIN_PROVIDER [complex*16, greens_R, (greens_omega_N, n_iorb_R, ns_dets)]
             call wall_time(t0)
             allocate(H_c(nnz), H_p(N_det_l+1))
 
+            ! reduce sparse Hamiltonian to set of valid determinants for this excitation
             call sparse_csr_MM(H_c_all,H_p_all, I_k, H_c, H_p, N_det_l, nnz)
 
             nnz_l = H_p(N_det_l+1)-1
@@ -325,6 +328,7 @@ BEGIN_PROVIDER [complex*16, greens_R, (greens_omega_N, n_iorb_R, ns_dets)]
             t_H_c = H_c(:nnz_l)
             call move_alloc(t_H_c, H_c)
 
+            ! calculate entries of Hamiltonian
             call calc_sparse_dH(H_p, H_c, H_v, N_det_l, nnz_l, det_excited)
             ! call form_sparse_dH(H_p, H_c, H_v, s_max_sze, det_excited,&
             !                     iorb_R(iorb), 1, .true., N_det_l)
@@ -519,6 +523,7 @@ BEGIN_PROVIDER [complex*16, greens_A_complex, (greens_omega_N, n_iorb_A,ns_dets)
             call wall_time(t0)
             allocate(H_c(nnz), H_p(N_det_l+1))
 
+            ! reduce sparse Hamiltonian to set of valid determinants for this excitation
             call sparse_csr_MM(H_c_all,H_p_all, I_k, H_c, H_p, N_det_l, nnz)
 
             nnz_l = H_p(N_det_l+1)-1
@@ -528,6 +533,7 @@ BEGIN_PROVIDER [complex*16, greens_A_complex, (greens_omega_N, n_iorb_A,ns_dets)
             t_H_c = H_c(:nnz_l)
             call move_alloc(t_H_c, H_c)
 
+            ! calculate entries of Hamiltonian
             call calc_sparse_zH(H_p, H_c, H_v, N_det_l, nnz_l, det_excited)
             ! call form_sparse_zH(H_p, H_c, H_v, s_max_sze,det_excited,&
             !                     iorb_A(iorb), 1, .false., N_det_l)
@@ -715,6 +721,7 @@ BEGIN_PROVIDER [complex*16, greens_R_complex, (greens_omega_N, n_iorb_R,ns_dets)
             call wall_time(t0)
             allocate(H_c(nnz), H_p(N_det_l+1))
 
+            ! reduce sparse Hamiltonian to set of valid determinants for this excitation
             call sparse_csr_MM(H_c_all,H_p_all, I_k, H_c, H_p, N_det_l, nnz)
 
             nnz_l = H_p(N_det_l+1)-1
@@ -724,6 +731,7 @@ BEGIN_PROVIDER [complex*16, greens_R_complex, (greens_omega_N, n_iorb_R,ns_dets)
             t_H_c = H_c(:nnz_l)
             call move_alloc(t_H_c, H_c)
 
+            ! calculate entries of Hamiltonian
             call calc_sparse_zH(H_p, H_c, H_v, N_det_l, nnz_l, det_excited)
             ! call form_sparse_zH(H_p, H_c, H_v, s_max_sze,det_excited,&
             !                     iorb_R(iorb), 1, .true., N_det_l)

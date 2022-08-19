@@ -133,15 +133,11 @@ subroutine sparse_csr_zmv(A_v, A_c, A_p, x, y, sze, nnz)
     !$OMP END PARALLEL
 end
 
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-!! Utilties for reutilizing sparse matrices        !!!
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!!! Utilties for building and reutilizing sparse matrices !!!
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
 
 subroutine sparse_csr_MM(A_c, A_p, I_k, B_c, B_p, sze, nnz_in)
@@ -153,6 +149,15 @@ subroutine sparse_csr_MM(A_c, A_p, I_k, B_c, B_p, sze, nnz_in)
     ! against a low-rank identity matrix
     ! Used for transferring the sparsity calculation of the full system to the
     ! reduced pattern when a hole or particle is introduced!
+    ! 
+    ! A_c are the column indices of the full Hamiltonian
+    ! A_p are the row pointers of the full Hamiltonian
+    ! I_k is a length sze vector representing the low-rank identity matrix,
+    !       whose zeros are the determinants (nodes) removed from the full space
+    ! B_c are the output column indices of the reduced Hamiltonian
+    ! B_p are the output row pointers of the reduced Hamiltonian
+    ! sze is the full rank of A
+    ! nnz_in is the number of nonzeros in the full Hamiltonian
     END_DOC
     implicit none
 
@@ -275,7 +280,7 @@ subroutine sparse_csr_MM(A_c, A_p, I_k, B_c, B_p, sze, nnz_in)
 
     ! calculate CSR pointer ranges
     ! row i data goes from csr_s(i) to csr_s(i+1) - 1
-    ! use inclusive scan to reduce counts of rows in coo_n to set pointer ranges
+    ! use inclusive scan to reduce counts of rows in B_p to set pointer ranges
     !$OMP SINGLE
     B_p(1) = 1
     !$OMP END SINGLE
@@ -292,14 +297,6 @@ subroutine sparse_csr_MM(A_c, A_p, I_k, B_c, B_p, sze, nnz_in)
     end do
     !$OMP END SINGLE
     !$OMP BARRIER
-
-
-    ! !$OMP SINGLE
-    ! do i = 1, sze+1
-    !     print *, B_p(i), coo_s(i)
-    ! end do
-    ! !$OMP END SINGLE
-    ! !$OMP BARRIER
 
     ! loop through rows and construct CSR matrix from COO temp arrays
     !$OMP DO SCHEDULE(GUIDED)
@@ -321,16 +318,11 @@ subroutine get_sparsity_structure(csr_s, csr_c, sze, N_det_l)
     implicit none
     BEGIN_DOC
     ! Form a compressed sparse row matrix representation of the Hamiltonian
-    ! in the space of the determinants. For real Hamiltonians (molecules).
+    ! connectivity in the space of the determinants. 
 
     ! csr_s are the row pointers
     ! csr_c are the column indices
-    ! csr_v are the matrix values
     ! sze is the maximum possible number of nonzero entreis
-    ! dets are the determinants which form the space of the Hamiltonian
-    ! iorb is the oribital into which a hole/particle is being created
-    ! ispin is the spin of the hole/particle
-    ! ac_type is F for adding an electron, T if removing
     ! N_det_l is the largest index of the determinants to include (when sorted by energy) 
     END_DOC
 
@@ -503,9 +495,6 @@ subroutine get_all_sparse_columns(k_a, columns, row, nnz, nnz_max, N_det_l)
     ! row is the index in the energy ordering corresponding to k_a
     ! nnz is the number of entries in columns
     ! nnz_max is the maximum number of entries allowed in column
-    ! iorb is the orbital into which a hole/particle is created
-    ! ispin is the spin of the hole/particle
-    ! ac_type == F if adding electron, T if removing
     ! N_det_l is the largest index of the determinants to include (when sorted by energy) 
     END_DOC
 
@@ -718,6 +707,12 @@ subroutine calc_sparse_dH(H_p, H_c, H_v, sze, nnz, dets)
     BEGIN_DOC
     ! Calculate the entries to the sparse Hamiltonian, given the structure
     ! in CSR format
+    ! H_p are the row pointers
+    ! H_c are the column indices
+    ! H_v are the values of the Hamiltonian
+    ! sze is the square side length of the Hamiltonian
+    ! nnz is the total number of non zeros
+    ! dets is the set of (excited) determinants used to calculate the matrix entries
     END_DOC
 
     integer :: i, j
@@ -749,6 +744,12 @@ subroutine calc_sparse_zH(H_p, H_c, H_v, sze, nnz, dets)
     BEGIN_DOC
     ! Calculate the entries to the sparse Hamiltonian, given the structure
     ! in CSR format
+    ! H_p are the row pointers
+    ! H_c are the column indices
+    ! H_v are the values of the Hamiltonian
+    ! sze is the square side length of the Hamiltonian
+    ! nnz is the total number of non zeros
+    ! dets is the set of (excited) determinants used to calculate the matrix entries
     END_DOC
 
     integer :: i, j
