@@ -117,7 +117,8 @@ BEGIN_PROVIDER [complex*16, greens_A, (greens_omega_N, n_iorb_A, ns_dets)]
             allocate(H_c(nnz), H_p(N_det_l+1))
 
             ! reduce sparse Hamiltonian to set of valid determinants for this excitation
-            call sparse_csr_MM(H_c_all,H_p_all, I_k, H_c, H_p, N_det_l, nnz)
+            ! call sparse_csr_MM(H_c_all,H_p_all, I_k, H_c, H_p, N_det_l, nnz)
+            call sparse_csr_MM_row_part(H_c_all,H_p_all, I_k, H_c, H_p, N_det_l, nnz)
 
             nnz_l = H_p(N_det_l+1)-1
 
@@ -319,7 +320,7 @@ BEGIN_PROVIDER [complex*16, greens_R, (greens_omega_N, n_iorb_R, ns_dets)]
             allocate(H_c(nnz), H_p(N_det_l+1))
 
             ! reduce sparse Hamiltonian to set of valid determinants for this excitation
-            call sparse_csr_MM(H_c_all,H_p_all, I_k, H_c, H_p, N_det_l, nnz)
+            call sparse_csr_MM_row_part(H_c_all,H_p_all, I_k, H_c, H_p, N_det_l, nnz)
 
             nnz_l = H_p(N_det_l+1)-1
 
@@ -493,6 +494,13 @@ BEGIN_PROVIDER [complex*16, greens_A_complex, (greens_omega_N, n_iorb_A,ns_dets)
         call wall_time(t0)
         allocate(H_c_all(s_max_sze), H_p_all(N_det_l+1), I_k(N_det_l))
         call get_sparsity_structure(H_p_all, H_c_all, s_max_sze, N_det_l)
+
+        if (.false.) then
+            print *, "Early stopping"
+            call dump_array_int("H_columns.out", H_c_all, H_p_all(N_det_l+1)-1)
+            call dump_array_int("H_rows.out", H_p_all, N_det_l+1)
+            stop
+        end if
         
         nnz = H_p_all(N_det_l+1)-1
 
@@ -524,7 +532,7 @@ BEGIN_PROVIDER [complex*16, greens_A_complex, (greens_omega_N, n_iorb_A,ns_dets)
             allocate(H_c(nnz), H_p(N_det_l+1))
 
             ! reduce sparse Hamiltonian to set of valid determinants for this excitation
-            call sparse_csr_MM(H_c_all,H_p_all, I_k, H_c, H_p, N_det_l, nnz)
+            call sparse_csr_MM_row_part(H_c_all,H_p_all, I_k, H_c, H_p, N_det_l, nnz)
 
             nnz_l = H_p(N_det_l+1)-1
 
@@ -722,7 +730,7 @@ BEGIN_PROVIDER [complex*16, greens_R_complex, (greens_omega_N, n_iorb_R,ns_dets)
             allocate(H_c(nnz), H_p(N_det_l+1))
 
             ! reduce sparse Hamiltonian to set of valid determinants for this excitation
-            call sparse_csr_MM(H_c_all,H_p_all, I_k, H_c, H_p, N_det_l, nnz)
+            call sparse_csr_MM_row_part(H_c_all,H_p_all, I_k, H_c, H_p, N_det_l, nnz)
 
             nnz_l = H_p(N_det_l+1)-1
 
@@ -846,11 +854,12 @@ subroutine build_A_wavefunction(i_particle, ispin, coef_out, det_out, N_det_l, I
     integer(bit_kind), intent(out) :: det_out(N_int,2,N_det_l)
     double precision, intent(out)  :: coef_out(N_det_l,N_states)
   
-    integer :: k
+    integer :: k, rank
     integer :: i_ok
     double precision :: phase
 
     I_k = 0
+    rank = 0
     do k=1,N_det_l
       coef_out(k,:) = psi_coef(k,:)
       det_out(:,:,k) = psi_det(:,:,k)
@@ -859,11 +868,14 @@ subroutine build_A_wavefunction(i_particle, ispin, coef_out, det_out, N_det_l, I
         call get_phase_ca(psi_det(:,:,k),i_particle,ispin,phase)
         coef_out(k,:) = phase * coef_out(k,:)
         I_k(k) = 1
+        rank += 1
       else
         coef_out(k,:) = 0.d0
         det_out(:,:,k) = psi_det(:,:,k)
       endif
     enddo
+
+    write(*, "(A20, I8, A1, I8)"), "Rank of N+1 space: ", rank, "/", N_det_l
 end
 
 subroutine build_R_wavefunction(i_hole, ispin, coef_out, det_out, N_det_l, I_k)
@@ -877,11 +889,12 @@ subroutine build_R_wavefunction(i_hole, ispin, coef_out, det_out, N_det_l, I_k)
     integer(bit_kind), intent(out) :: det_out(N_int,2,N_det_l)
     double precision, intent(out)  :: coef_out(N_det_l,N_states)
   
-    integer :: k
+    integer :: k, rank
     integer :: i_ok
     double precision :: phase
 
     I_k = 0
+    rank = 0
     do k=1,N_det_l
       coef_out(k,:) = psi_coef(k,:)
       det_out(:,:,k) = psi_det(:,:,k)
@@ -890,11 +903,14 @@ subroutine build_R_wavefunction(i_hole, ispin, coef_out, det_out, N_det_l, I_k)
         call get_phase_ca(psi_det(:,:,k),i_hole,ispin,phase)
         coef_out(k,:) = phase * coef_out(k,:)
         I_k(k) = 1
+        rank += 1
       else
         coef_out(k,:) = 0.d0
         det_out(:,:,k) = psi_det(:,:,k)
       endif
     enddo
+
+    write(*, "(A20, I8, A1, I8)"), "Rank of N-1 space: ", rank, "/", N_det_l
 end
 
 subroutine build_A_wavefunction_complex(i_particle, ispin, coef_out, det_out, N_det_l, I_k)
@@ -908,11 +924,12 @@ subroutine build_A_wavefunction_complex(i_particle, ispin, coef_out, det_out, N_
     integer(bit_kind), intent(out) :: det_out(N_int,2,N_det_l)
     complex*16, intent(out)       :: coef_out(N_det_l,N_states)
   
-    integer :: k
+    integer :: k, rank
     integer :: i_ok
     double precision :: phase
 
     I_k = 0
+    rank = 0
     do k=1,N_det_l
       coef_out(k,:) = psi_coef_complex(k,:)
       det_out(:,:,k) = psi_det(:,:,k)
@@ -921,11 +938,14 @@ subroutine build_A_wavefunction_complex(i_particle, ispin, coef_out, det_out, N_
         call get_phase_ca(psi_det(:,:,k),i_particle,ispin,phase)
         coef_out(k,:) = phase * coef_out(k,:)
         I_k(k) = 1
+        rank += 1
       else
         coef_out(k,:) = (0.d0, 0.d0)
         det_out(:,:,k) = psi_det(:,:,k)
       endif
     enddo
+
+    write(*, "(A20, I8, A1, I8)"), "Rank of N+1 space: ", rank, "/", N_det_l
 end
 
 subroutine build_R_wavefunction_complex(i_hole,ispin,coef_out, det_out, N_det_l, I_k)
@@ -939,11 +959,12 @@ subroutine build_R_wavefunction_complex(i_hole,ispin,coef_out, det_out, N_det_l,
     integer(bit_kind), intent(out) :: det_out(N_int,2,N_det_l)
     complex*16, intent(out)       :: coef_out(N_det_l,N_states)
   
-    integer :: k
+    integer :: k, rank
     integer :: i_ok
     double precision :: phase
 
     I_k = 0
+    rank = 0
     do k=1,N_det_l
       coef_out(k,:) = psi_coef_complex(k,:)
       det_out(:,:,k) = psi_det(:,:,k)
@@ -952,11 +973,13 @@ subroutine build_R_wavefunction_complex(i_hole,ispin,coef_out, det_out, N_det_l,
         call get_phase_ca(psi_det(:,:,k),i_hole,ispin,phase)
         coef_out(k,:) = phase * coef_out(k,:)
         I_k(k) = 1
+        rank += 1
       else
         coef_out(k,:) = (0.d0, 0.d0)
         det_out(:,:,k) = psi_det(:,:,k)
       endif
     enddo
+    write(*, "(A20, I8, A1, I8)"), "Rank of N-1 space: ", rank, "/", N_det_l
 end
 
 subroutine add_electron(key_in,i_particle,ispin,i_ok)
@@ -1294,6 +1317,25 @@ subroutine set_ref_bitmask_complex(iorb, ispin, ac_type)
 
     !! Force provides for single excitation things
     PROVIDE fock_op_cshell_ref_bitmask_kpts
+
+end
+
+subroutine dump_array_int(fname, arr, sze)
+    implicit none
+
+    integer, intent(in) :: sze
+    integer, intent(in) :: arr(sze)
+    character(len=72), intent(in) :: fname
+
+
+    integer :: i
+
+    open(1, file=fname, action="WRITE")
+    do i = 1, sze
+        write(1, "(I8)"), arr(i)
+    end do
+
+    close(1)
 
 end
 

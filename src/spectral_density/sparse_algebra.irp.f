@@ -314,6 +314,200 @@ subroutine sparse_csr_MM(A_c, A_p, I_k, B_c, B_p, sze, nnz_in)
     
 end
 
+subroutine sparse_csr_MM_row_part(A_c, A_p, I_k, B_c, B_p, sze, nnz_in)
+    BEGIN_DOC
+    ! Matrix matrix multiplication routine for sparse matrices
+    ! With row partitioning during worksharing
+    ! NOT general
+    ! Performs A I = B, returning B in CSR format
+    ! Performs the multiplication between a symmetric, CSR matrix of 1s/0s
+    ! against a low-rank identity matrix
+    ! Used for transferring the sparsity calculation of the full system to the
+    ! reduced pattern when a hole or particle is introduced!
+    ! 
+    ! A_c are the column indices of the full Hamiltonian
+    ! A_p are the row pointers of the full Hamiltonian
+    ! I_k is a length sze vector representing the low-rank identity matrix,
+    !       whose zeros are the determinants (nodes) removed from the full space
+    ! B_c are the output column indices of the reduced Hamiltonian
+    ! B_p are the output row pointers of the reduced Hamiltonian
+    ! sze is the full rank of A
+    ! nnz_in is the number of nonzeros in the full Hamiltonian
+    END_DOC
+    implicit none
+
+    integer, intent(in) :: sze, nnz_in, A_c(nnz_in), A_p(sze+1), I_k(sze)
+    integer, intent(out):: B_c(nnz_in), B_p(sze+1)
+    integer :: i, j, k, ii, kk, lcol, nnz_cnt, old_row, nnz_tot
+    integer              :: n_vals, n_threads, ID, scn_a, nnz
+    integer :: OMP_get_num_threads, OMP_get_thread_num
+    integer, allocatable :: nnz_arr(:), coo_r(:), coo_c(:)
+    integer, allocatable :: coo_r_all(:), coo_c_all(:), coo_r_t(:), coo_c_t(:)
+    integer, allocatable:: coo_s(:), csr_n(:)
+    double precision     :: frac
+
+    integer :: target_N, row_start, row_end
+    integer, allocatable :: pointer_blocks(:), row_starts(:)
+
+    !$OMP PARALLEL SHARED(nnz_tot, nnz_arr, n_threads, target_N, nnz_in, pointer_blocks, row_starts,&
+    !$OMP                 coo_r_all, coo_c_all, coo_s, I_k, A_c, A_p, B_c, B_p)& 
+    !$OMP PRIVATE(i,j,old_row, k,ii,kk, scn_a, ID, nnz, nnz_cnt, coo_r, coo_c, coo_r_t, coo_c_t, lcol, row_start, row_end) 
+
+
+    !$ n_threads = OMP_get_num_threads()
+    !$ ID = OMP_get_thread_num() + 1
+
+    !$OMP SINGLE
+    allocate(coo_s(sze), pointer_blocks(sze+1), row_starts(n_threads+1))
+    pointer_blocks = 0
+    row_starts = 0
+    B_p = 0
+    target_N = nnz_in / n_threads
+    !$OMP END SINGLE
+    !$OMP BARRIER
+
+    ! split the work so that different groups of contiguous rows have roughly equal entries
+    !$OMP DO SCHEDULE(GUIDED)
+    do i = 1, sze+1
+        pointer_blocks(i) = A_p(i) / target_N + 1
+    end do
+    !$OMP END DO
+
+    ii = (sze / n_threads)*(ID-1) + 1 ! start of range
+    kk = (sze / n_threads) * ID + 3 ! end of range, slight overlap to catch boundary pointers
+    if (ID == n_threads) kk = sze
+    old_row = pointer_blocks(ii)
+    
+    do i = ii, kk 
+        if(pointer_blocks(i) .ne. old_row) then 
+            row_starts(pointer_blocks(i)) = i
+            old_row = pointer_blocks(i)
+        end if 
+    end do
+    
+    !$OMP SINGLE
+    row_starts(1) = 1
+    row_starts(n_threads+1) = sze+1
+    !$OMP END SINGLE
+    
+    row_start = row_starts(ID)
+    row_end = row_starts(ID+1) - 1
+    if (ID == n_threads) row_end = sze
+
+    ! allocate arrays and start main work loops
+    n_vals = A_p(row_end+1)-A_p(row_start)
+
+    allocate(coo_r(n_vals))
+    allocate(coo_c(n_vals))
+
+    !$OMP SINGLE
+    allocate(nnz_arr(n_threads))
+    nnz_tot = 0
+    !$OMP END SINGLE
+
+
+    ! loop over rows
+    nnz_cnt = 0
+    do i = row_start, row_end
+
+        if (I_k(i) == 0) cycle ! node is emoved from graph
+
+        ! nnz = A_p(i+1)-1 - A_p(i) ! maximum reallocation size
+
+        ! loop over columns in row
+        do j = A_p(i), A_p(i+1)-1
+            lcol = A_c(j)
+            if (I_k(lcol) == 1) then ! current column still in space
+                B_p(i+1) += 1 ! increase pointer spacing
+                nnz_cnt += 1
+                coo_r(nnz_cnt) = i ! store rows/columns in COO buffers
+                coo_c(nnz_cnt) = lcol
+            end if
+
+        end do
+
+    end do
+
+    nnz_arr(ID) = nnz_cnt
+
+    !$OMP CRITICAl
+    nnz_tot = nnz_tot + nnz_cnt
+    !$OMP END CRITICAl
+    !$OMP BARRIER
+    
+    !$OMP SINGLE
+    print *, "Total non-zero entries in Hamiltonian: ", nnz_tot, " max size:", nnz_in
+    !$OMP END SINGLE
+
+    !$OMP SINGLE
+    allocate(coo_r_all(nnz_tot))
+    allocate(coo_c_all(nnz_tot))
+    !$OMP END SINGLE
+
+    k = 0
+    do i = 1, ID-1
+        k += nnz_arr(i)
+    end do
+
+    ! coo_*_all are in shared memory; since threads have disjoint work, this is safe
+    coo_r_all(k+1:k+nnz_arr(ID)) = coo_r
+    coo_c_all(k+1:k+nnz_arr(ID)) = coo_c
+    !$OMP BARRIER
+
+    ! calculate the starting index of each row in COO, since there is no sorting guarantee
+    ! iterate over range, keep track of current row; if row changes, record the row start
+    ii = (nnz_tot / n_threads)*(ID-1) + 1 ! start of range
+    kk = (nnz_tot / n_threads) * ID + 3 ! end of range, slight overlap to catch boundary pointers
+    if (ID == n_threads) kk = nnz_tot
+    old_row = coo_r_all(ii)
+
+    do i = ii, kk 
+        if(coo_r_all(i) .ne. old_row) then 
+            coo_s(coo_r_all(i)) = i
+            old_row = coo_r_all(i)
+        end if 
+    end do
+
+    ! make sure first row in COO is accounted for
+    !$OMP SINGLE
+    coo_s(coo_r_all(1)) = 1
+    !$OMP END SINGLE
+
+    ! calculate CSR pointer ranges
+    ! row i data goes from csr_s(i) to csr_s(i+1) - 1
+    ! use inclusive scan to reduce counts of rows in B_p to set pointer ranges
+    !$OMP SINGLE
+    B_p(1) = 1
+    !$OMP END SINGLE
+    
+    ! need to strongly enforce synchronization here
+    !$OMP BARRIER
+    !$OMP SINGLE
+    scn_a = 0
+    !$OMP SIMD REDUCTION(inscan, +:scn_a)
+    do i = 1, sze+1
+        scn_a = scn_a + B_p(i)
+        !$OMP SCAN INCLUSIVE(scn_a)
+        B_p(i) = scn_a
+    end do
+    !$OMP END SINGLE
+    !$OMP BARRIER
+
+    ! loop through rows and construct CSR matrix from COO temp arrays
+    do i = row_start, row_end
+        B_c(B_p(i):B_p(i+1)-1) = coo_c_all(coo_s(i):coo_s(i+1)-1)
+    end do
+
+    deallocate(coo_r, coo_c)
+    
+    !$OMP BARRIER
+    !$OMP SINGLE
+    deallocate(coo_s, nnz_arr, coo_r_all, coo_c_all, pointer_blocks, row_starts)
+    !$OMP END SINGLE
+    !$OMP END PARALLEL
+    
+end
+
 subroutine get_sparsity_structure(csr_s, csr_c, sze, N_det_l)
     implicit none
     BEGIN_DOC
