@@ -76,7 +76,7 @@ subroutine insert_key_val_pair(hash_alpha ,hash_beta,hash_vals,hash_prime,ht_siz
     success = .true.
 end
 
-subroutine build_hash_table( hash_alpha, hash_beta, hash_vals, hash_prime, ht_size, I_cut, I_det, n_orb, n_det_l, n_det_out)
+subroutine build_hash_table( hash_alpha, hash_beta, hash_vals, hash_prime, ht_size, I_cut, I_det, n_orb, n_det_l, det_basis, n_det_out)
     implicit none
     BEGIN_DOC
     ! Construct the hash table
@@ -86,6 +86,7 @@ subroutine build_hash_table( hash_alpha, hash_beta, hash_vals, hash_prime, ht_si
     integer(bit_kind), intent(in) :: I_det(N_int, 2, n_det_l, n_orb)
     integer, intent(out)    :: n_det_out, hash_vals(ht_size)
     integer(bit_kind), intent(out) :: hash_alpha(N_int, ht_size), hash_beta(N_int, ht_size)
+    integer(bit_kind), intent(out) :: det_basis(N_int, 2, n_det_l*n_orb)
     logical                 :: hash_success
 
 
@@ -101,6 +102,7 @@ subroutine build_hash_table( hash_alpha, hash_beta, hash_vals, hash_prime, ht_si
 
                 if (hash_success) then
                     n_det_out += 1
+                    det_basis(:, :, n_det_out) = I_det(:,:,i,iorb)
                 end if
 
             end if
