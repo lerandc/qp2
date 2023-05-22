@@ -875,21 +875,173 @@ subroutine uH_structure_from_gH(H_p, H_c, H_e, uH_p, uH_c, N_det_g, N_det_u,nnz_
 
     implicit none
     
+    !! input data
     integer, intent(in) :: N_det_g, N_det_u, nnz_g, nnz_max, N_exc
     integer, intent(in) :: H_p(N_det_g+1), H_c(nnz_g), H_e(nnz_g)
     
     integer, intent(in) :: hash_table_size, hash_prime
-    integer, intent(in) :: hash_alpha(hash_table_size), hash_beta(hash_table_size), hash_value(hash_table_size)
+    integer, intent(in) :: hash_alpha(hash_table_size), hash_beta(hash_table_size), hash_vals(hash_table_size)
     logical             :: hash_success
     
     integer, intent(in) :: I_cut_k(N_det_g, N_exc)
     integer(bit_kind), intent(in)   :: I_det_k(N_int, 2, N_det_u, N_exc)
     
-    integer, intent(out):: uH_p(N_det_u+1), uH_c(nnz_max)
+    !! output data
+    integer, intent(out) :: uH_p(N_det_u+1), uH_c(nnz_max)
 
+    !! hash functions
+    integer :: hash_value
+
+    !! routine variables
+    integer             :: i_exc, j_exc, row, pidx, col, target_row, target_col, cur_exc_degree
+    integer(bit_kind)   :: target_row_det(N_int, 2), target_col_det(N_int, 2)
+    logical :: criterion_a, criterion_b, criterion_c, add_pair
+
+    ! using buffers to reduce the need to reallocate the arrays at all the 'append' points
+    ! makes code cleaner, but probably not any faster; in c++, just use vectors
+    integer              :: buffer_size, buffer_count, nts_buffer_count
+    integer, allocatable :: coo_r(:),coo_c(:), coo_r_nts(:), coo_c_nts(:), tr_buffer(:), tc_buffer(:), tr_nts_buffer(:), tc_nts_buffer(:)
     
-    integer :: i, j, row, col, target_row, target_col
+    buffer_count = 0
+    nts_buffer_count = 0
+    buffer_size = 8192
+    allocate(tc_buffer(buffer_size), tr_buffer(buffer_size), tc_nts_buffer(buffer_size), tr_nts_buffer(buffer_size)) ! private
     
+    !! loop over excitation pairs
+    do i_exc = 1, N_exc
+        do j_exc = 1, N_exc
+
+            !! loop over matrix entries
+            do row = 1, N_det_g
+
+                ! row cannot accept current i excitation
+                if (I_cut_k(row, i_exc) == 0) then
+                    cycle
+                end if
+
+                target_row_det = I_det_k(:, :, row, i_exc)
+                target_row = hash_value( hash_alpha, hash_beta, hash_vals,hash_prime,hash_table_size,target_row_det(:,1), target_row_det(:,2))
+                
+                !! handle diagonal excitations out of loop
+                if (i_exc == j_exc) then
+                    buffer_count += 1
+                    tr_buffer(buffer_count) = target_row
+                    tc_buffer(buffer_count) = target_row
+                else if (( j_exc > i_exc ) .and. ( I_cut_k(row, j_exc) == 1 )) then
+                    
+                    target_col_det = I_det_k(:, :, row, j_exc)
+                    target_col = hash_value( hash_alpha, hash_beta, hash_vals,hash_prime,hash_table_size, target_col_det(:,1), target_col_det(:,2))
+                    
+                    if (target_col < target_row) then
+                        nts_buffer_count += 1
+                        tr_buffer(nts_buffer_count) = target_col
+                        tc_buffer(nts_buffer_count) = target_row
+                    else if (target_col > target_row) then
+                        buffer_count += 1
+                        tr_buffer(buffer_count) = target_row
+                        tc_buffer(buffer_count) = target_col
+                    end if
+
+                end if
+                
+                
+                !! handle off diagonal excitations
+                do pidx = H_p(row) + 1, H_p(row+1) - 1
+                    
+                    !! offload buffers and reallocate main arrays if necessary
+                    if (buffer_count > (buffer_size - 100)) then ! off load sorted buffer
+                        
+                        buffer_count = 0
+                    end if
+                    
+                    if (nts_buffer_count > (buffer_size - 100)) then ! off load unsorted buffer
+                        
+                        nts_buffer_count = 0
+                    end if
+                    
+                    !! add in new entries from determinant pair
+                    col = H_c(pidx)
+
+                    
+                    if (I_cut_k(col, j_exc)) then
+                        target_col_det = I_det_k(:, :, col, j_exc)
+                        target_col = hash_value( hash_alpha, hash_beta, hash_vals,hash_prime,hash_table_size, target_col_det(:,1), target_col_det(:,2))
+                        
+                        cur_exc_degree = H_e(pidx)
+
+                        if (i_exc == j_exc) then
+                            ! add in edges from intrinsic space
+                            ! avoid any triple excitation pairs
+                            if ((cur_exc_degree < 7) .and. (cur_exc_degree /= 3 )) then
+                                if (target_col < target_row) then
+                                    nts_buffer_count += 1
+                                    tr_buffer(nts_buffer_count) = target_col
+                                    tc_buffer(nts_buffer_count) = target_row
+                                else if (target_col > target_row) then
+                                    buffer_count += 1
+                                    tr_buffer(buffer_count) = target_row
+                                    tc_buffer(buffer_count) = target_col
+                                end if
+                            end if
+                        else
+                            !! following schema for determining how many determinants to add relies on fact that
+                            !! applied excitations are within the same spin channel
+
+                            ! both excitations are accepted in both determinants, and alpha degree increases by 1
+                            criterion_a = (  ((I_cut_k(row, i_exc) == I_cut_k(col, i_exc))) .and. ((I_cut_k(row, j_exc) == I_cut_k(col, j_exc))) )
+
+                            ! determinants accept exclusive excitations, and alpha degree reduces by 1
+                            criterion_b = ((I_cut_k(row, i_exc) /= I_cut_k(col, i_exc))) .and. ((I_cut_k(row, j_exc) /= I_cut_k(col, j_exc)))
+
+                            ! one determinant can accept both excitations, while other can accept only one; overall degree stays same
+                            criterion_c = (  ((I_cut_k(row, i_exc) /= I_cut_k(col, i_exc))) /= ((I_cut_k(row, j_exc) /= I_cut_k(col, j_exc))) )&
+                                    .and. (  ((I_cut_k(row, i_exc) == I_cut_k(col, i_exc))) /= ((I_cut_k(row, j_exc) == I_cut_k(col, j_exc))) )
+
+                            add_pair = .false.
+                            select case (cur_exc_degree)
+                                case (1) ! (1,0) -> (1,0), (2,0)
+                                    !add_pair = criterion_c .or. ~criterion_c ! if c then (1,0), else (2,0)
+                                    add_pair = .true. 
+                                case (2) ! (2,0) -> (1,0), (2,0)
+                                    add_pair = criterion_b .or. criterion_c 
+                                case (3) ! (3,0) -> (2,0)
+                                    add_pair = criterion_b
+                                case (4) ! (0,1) -> (0,1), (1,1) 
+                                    add_pair = criterion_a .or. criterion_c
+                                case (5) ! (0,2) -> (0,2)
+                                    add_pair = criterion_c
+                                case (6) ! (1,1) -> (0,1), (1,1)
+                                    add_pair = criterion_b .or. criterion_c
+                                case (7) ! (1,2) -> (0,2)
+                                    add_pair = criterion_b
+                                case (8) ! (2,1) -> (1,1)
+                                    add_pair = criterion_b
+                            end select
+
+                            if ( add_pair ) then
+                                if (target_col < target_row) then
+                                    nts_buffer_count += 1
+                                    tr_buffer(nts_buffer_count) = target_col
+                                    tc_buffer(nts_buffer_count) = target_row
+                                else if (target_col > target_row) then
+                                    buffer_count += 1
+                                    tr_buffer(buffer_count) = target_row
+                                    tc_buffer(buffer_count) = target_col
+                                end if
+                            end if
+                        end if 
+
+                    end if
+
+                end do
+
+            end do
+
+        end do
+    end do
+
+    deallocate(tc_buffer, tr_buffer, tc_nts_buffer, tr_nts_buffer)
+
 end
 
 subroutine get_all_sparse_columns(k_a, columns, row, nnz, nnz_max, N_det_l)
