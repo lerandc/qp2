@@ -248,8 +248,8 @@ BEGIN_PROVIDER [complex*16, greens_R, (greens_omega_N, n_iorb_R, ns_dets)]
     integer                 :: hash_table_size, n_coupled_dets, hash_prime, nnz_max_u
     integer, allocatable    :: I_cut_k(:,:), hash_value(:), H_e_all(:), t_H_e(:)
     integer, allocatable    :: uH_p(:), uH_c(:), uH_v(:), t_uH_c(:)
-    integer(bit_kind), allocatable :: I_det_k(:,:,:,:),hash_alpha(:,:),hash_beta(:,:),det_basis(:,;,:),t_det_basis(:,:,:)
-    double_precision, allocatable  :: psi_coef_intrinsic_excited(:,:,:),psi_coef_coupled_excited(:,:)
+    integer(bit_kind), allocatable :: I_det_k(:,:,:,:), hash_alpha(:,:), hash_beta(:,:), det_basis(:,:,:), t_det_basis(:,:,:)
+    double precision, allocatable  :: psi_coef_intrinsic_excited(:,:,:), psi_coef_coupled_excited(:,:)
 
     ! calculate the maximum size of the sparse arrays with some overflow protection
     ! could still be much improved
@@ -303,10 +303,10 @@ BEGIN_PROVIDER [complex*16, greens_R, (greens_omega_N, n_iorb_R, ns_dets)]
         do iorb = 1, n_iorb_R
 
             call build_R_wavefunction(iorb_R(iorb), 1, &
-                                    psi_coef_intrinsic_excited(:,:,:,iorb), &
+                                    psi_coef_intrinsic_excited(:,:,iorb), &
                                     I_det_k(:,:,:,iorb), &
                                     N_det_l, &
-                                    I_cut_k(:,:,:,iorb),&
+                                    I_cut_k(:,iorb),&
                                     )
         end do
 

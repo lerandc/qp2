@@ -1,3 +1,21 @@
+logical function det_equal(alpha_a, beta_a, alpha_b, beta_b)
+    implicit none
+
+    integer(bit_kind), intent(in) :: alpha_a(N_int), beta_a(N_int), alpha_b(N_int), beta_b(N_int)
+    integer :: i
+
+    do i = 1, N_int
+        if ((alpha_a(i) /= alpha_b(i)) .or. (beta_a(i) /= beta_b(i))) then
+            det_equal = .false.
+            return
+        end if
+    end do
+
+    det_equal = .true.
+    return
+
+end function det_equal
+
 integer function hash_index(det_alpha, det_beta, hash_prime, ht_size, n_orbs)
     implicit none
     BEGIN_DOC
@@ -23,14 +41,16 @@ integer function hash_value( hash_alpha, hash_beta, hash_vals, hash_prime, ht_si
     integer, intent(in) :: det_alpha, det_beta, hash_prime, ht_size
     integer, intent(inout) :: hash_vals(ht_size)
     integer(bit_kind), intent(inout) :: hash_alpha(N_int, ht_size), hash_beta(N_int, ht_size)
-    integer:: idx, hash_index
+    integer :: idx, hash_index
+    logical :: det_equal
 
     idx = hash_index( det_alpha, det_beta, hash_prime)
     
     ! search for value with linear probing
     ! rely on table not being full to avoid infinite loop when key doesn't exist
-    do while ( (hash_alpha(idx) > 0))
-        if ((hash_alpha(idx) == det_alpha) .and. (hash_beta(idx) == det_beta)) then
+    ! TODO: hash_alpha(1, idx) can be zero if the none of the electrons are in the first integer
+    do while ( (hash_alpha(1, idx) > 0))
+        if ( det_equal(hash_alpha(:,idx), hash_beta(:,idx), det_alpha, det_beta) ) then
             hash_value = hash_vals(idx)
             return
         end if
@@ -53,14 +73,15 @@ subroutine insert_key_val_pair(hash_alpha ,hash_beta,hash_vals,hash_prime,ht_siz
     logical, intent(out)   :: success
     integer, intent(inout) :: hash_vals(ht_size)
     integer(bit_kind), intent(inout) :: hash_alpha(N_int, ht_size), hash_beta(N_int, ht_size)
-    integer                :: idx, hash_index
+    integer :: idx, hash_index
+    logical :: det_equal
     
     idx = hash_index(det_alpha, det_beta, hash_prime)
     
     ! search for value with linear probing
     ! rely on table not being full to avoid infinite loop when key doesn't exist
-    do while ((hash_alpha(idx) > 0))
-        if ((hash_alpha(idx) == det_alpha) .and. (hash_beta(idx) == det_beta)) then
+    do while ((hash_alpha(1, idx) > 0))
+        if ( det_equal(hash_alpha(:,idx), hash_beta(:,idx), det_alpha, det_beta) ) then
             ! determinant exists already in the table
             success = .false.
             return
@@ -69,8 +90,8 @@ subroutine insert_key_val_pair(hash_alpha ,hash_beta,hash_vals,hash_prime,ht_siz
         idx = modulo(idx, ht_size)
     end do
 
-    hash_alpha(idx) = det_alpha
-    hash_beta(idx) = det_beta
+    hash_alpha(:, idx) = det_alpha
+    hash_beta(:, idx) = det_beta
     hash_vals(idx) = target_row
 
     success = .true.
@@ -82,13 +103,14 @@ subroutine build_hash_table( hash_alpha, hash_beta, hash_vals, hash_prime, ht_si
     ! Construct the hash table
     END_DOC
 
-    integer, intent(in)     :: ht_size, hash_prime, n_orb, n_det_l, I_cut(n_det_l, n_orb),
+    integer, intent(in)     :: ht_size, hash_prime, n_orb, n_det_l, I_cut(n_det_l, n_orb)
     integer(bit_kind), intent(in) :: I_det(N_int, 2, n_det_l, n_orb)
     integer, intent(out)    :: n_det_out, hash_vals(ht_size)
     integer(bit_kind), intent(out) :: hash_alpha(N_int, ht_size), hash_beta(N_int, ht_size)
     integer(bit_kind), intent(out) :: det_basis(N_int, 2, n_det_l*n_orb)
     logical                 :: hash_success
 
+    integer :: i, iorb
 
     n_det_out = 0
 
@@ -98,7 +120,7 @@ subroutine build_hash_table( hash_alpha, hash_beta, hash_vals, hash_prime, ht_si
             if (I_cut(i, iorb) == 1) then
                 
                 call insert_key_val_pair(hash_alpha, hash_beta, hash_vals, hash_prime, ht_size, &
-                                         I_det(:,1,i,iorb), I_det_k(:,2,i,iorb), n_det_out, hash_success)
+                                         I_det(:,1,i,iorb), I_det(:,2,i,iorb), n_det_out, hash_success)
 
                 if (hash_success) then
                     n_det_out += 1
@@ -106,6 +128,7 @@ subroutine build_hash_table( hash_alpha, hash_beta, hash_vals, hash_prime, ht_si
                 end if
 
             end if
+        end do
     end do
 
 

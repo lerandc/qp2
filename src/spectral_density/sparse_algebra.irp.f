@@ -867,7 +867,7 @@ end
 
 
 subroutine uH_structure_from_gH(H_p, H_c, H_e, uH_p, uH_c, N_det_g, N_det_u,nnz_g,nnz_max,N_exc,&
-                                hash_alpha, hash_beta, hash_value, hash_prime, hash_table_size,&
+                                hash_alpha, hash_beta, hash_vals, hash_prime, hash_table_size,&
                                 I_cut_k, I_det_k)
     BEGIN_DOC
     ! Calculate the N+1/N-1 Hamiltonian from the ground state Hamiltonian with triples in CSR format
@@ -894,6 +894,9 @@ subroutine uH_structure_from_gH(H_p, H_c, H_e, uH_p, uH_c, N_det_g, N_det_u,nnz_
     !! hash functions
     integer :: hash_value
 
+    !! OMP calls
+    integer :: OMP_get_num_threads, OMP_get_thread_num
+
     !! routine variables
     integer             :: i, ii, j, jj, k, kk
     integer             :: i_exc, j_exc, row, pidx, col, target_row, target_col, cur_exc_degree
@@ -901,25 +904,24 @@ subroutine uH_structure_from_gH(H_p, H_c, H_e, uH_p, uH_c, N_det_g, N_det_u,nnz_
     integer(bit_kind)   :: target_row_det(N_int, 2), target_col_det(N_int, 2)
     logical             :: criterion_a, criterion_b, criterion_c, add_pair
 
-    ! using buffers to reduce the need to reallocate the arrays at all the 'append' points
-    ! makes code cleaner, but probably not any faster; in c++, just use vectors
     integer              :: buffer_count, nts_buffer_count, max_new_entries, buffer_total, ubuffer_total, umax_block_size
     integer              :: block_start, block_end, nts_block_start, nts_block_end, block_total, max_block_size
+
     integer, allocatable :: coo_r(:), coo_c(:), coo_n(:), coo_r_nts(:), coo_c_nts(:), coo_n_nts(:)
     integer, allocatable :: u_coo_r(:), u_coo_c(:), u_coo_n(:)
     integer, allocatable :: coo_c_all(:), coo_n_all(:), nnz_arr(:,:), u_coo_n_all(:)
     integer, allocatable :: t_coo_r(:), t_coo_c(:), sort_idx(:)
     integer, allocatable :: row_starts(:), pointer_blocks(:)
-    integer              :: row_start, row_end
+    integer              :: row_start, row_end, old_row
 
     buffer_count = 0
     nts_buffer_count = 0
 
     ! coo_x stores entries blocked by row; coo_x_nts stores entries in unsorted order
     !$OMP PARALLEL DEFAULT(PRIVATE) SHARED(N_det_g, N_det_u, nnz_g, nnz_max, N_exc, H_p, H_c, H_e,&
-    !$OMP                                  uH_p, uH_c, coo_s, pointer_blocks, row_starts, target_N, n_threads,&
+    !$OMP                                  uH_p, uH_c, pointer_blocks, row_starts, target_N, n_threads,&
     !$OMP                                  hash_table_size, hash_prime, hash_alpha, hash_beta, hash_vals,&
-    !$OMP                                  I_cut_k, I_det_k, coo_r_all, coo_c_all, coo_n_all, nnz_arr, umax_block_size)
+    !$OMP                                  I_cut_k, I_det_k, coo_c_all, coo_n_all, nnz_arr, umax_block_size)
 
     ! hopefully default private works because this is verbose
     ! OpenMP C API doesn't seem to have private, so when adapting, you will have to do this
@@ -1137,7 +1139,7 @@ subroutine uH_structure_from_gH(H_p, H_c, H_e, uH_p, uH_c, N_det_g, N_det_u,nnz_
     
     ! combine buffers by row block
     buffer_total = nts_buffer_count + buffer_count
-    allocate(u_coo_c(buffer_total), u_coo_n(N_det_u)+1)
+    allocate(u_coo_c(buffer_total), u_coo_n(N_det_u+1))
     u_coo_n(1) = 1
 
     ! scan block sizes to get a maximum block allocation
@@ -1743,7 +1745,7 @@ subroutine get_all_sparse_columns_with_triples( k_a, columns,exc_degree,row,nnz,
 
             ! tmp_det(:,2) and tmp_det2(:,2) should be the same?
             tdegree_alpha = 0
-            do i = 1, N_int
+            do k = 1, N_int
                 tdegree_alpha += popcnt(ieor(tmp_det(i,1), ref_det(i,1)))
             end do
 
@@ -1759,7 +1761,7 @@ subroutine get_all_sparse_columns_with_triples( k_a, columns,exc_degree,row,nnz,
                     case (4)
                         triples_case(n_triples_tot) = 7
                     case default
-                        write(*, ("(A40, I16, I16, I16)")),"Error in triple selection on krow/beta det/alpha det: " k_a, j, i
+                        write(*, ("(A40, I16, I16, I16)")),"Error in triple selection on krow/beta det/alpha det: ", k_a, j, i
                         exit
                 end select
             end if
@@ -1899,15 +1901,16 @@ subroutine calc_sparse_zH(H_p, H_c, H_v, sze, nnz, dets)
     !$OMP END PARALLEL
 end
 
-subroutine unique_from_sorted_buffer(arr, n_max, n_out):
+subroutine unique_from_sorted_buffer(arr, n_max, n_out)
     BEGIN_DOC
     ! Pack unique values into front of array, in-place
     ! Assumes array is sorted
     END_DOC
     implicit none
 
-    integer, intent(in)  :: n_max, rows(n_max)
-    integer, intent(out) :: n_out
+    integer, intent(in)   :: n_max
+    integer, intent(inout) :: arr(n_max)
+    integer, intent(out)  :: n_out
     integer :: i
 
 
@@ -1922,7 +1925,7 @@ subroutine unique_from_sorted_buffer(arr, n_max, n_out):
 
 end
 
-subroutine double_sort(rows, cols, n_max, row_starts, N_det_u):
+subroutine double_sort(rows, cols, n_max, row_starts, N_det_u)
     implicit none
 
     integer, intent(in)    :: n_max, N_det_u
@@ -1946,7 +1949,7 @@ subroutine double_sort(rows, cols, n_max, row_starts, N_det_u):
     tcols = cols
     do i = 1, n_max 
         cur_row = rows(i)
-        if (cur_row \= prev_row) then
+        if (cur_row /= prev_row) then
             n_rows += 1
             row_starts(n_rows) = i
         end if
@@ -1954,7 +1957,7 @@ subroutine double_sort(rows, cols, n_max, row_starts, N_det_u):
 
         prev_row = cur_row
     end do
-    row_starts(n_rows+1) = nnz_max
+    row_starts(n_rows+1) = n_max + 1
 
     ! sort cols within row block
     do i = 1, n_rows
@@ -1963,7 +1966,7 @@ subroutine double_sort(rows, cols, n_max, row_starts, N_det_u):
             sort_idx(j) = j
         end do
 
-        call insertion_isort(cols(row_strats(i):row_starts(i+1)-1), sort_idx(:n_cols), n_cols)
+        call insertion_isort(cols(row_starts(i):row_starts(i+1)-1), sort_idx(:n_cols), n_cols)
     end do
 
 
