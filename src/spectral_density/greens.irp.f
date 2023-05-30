@@ -354,7 +354,7 @@ BEGIN_PROVIDER [complex*16, greens_R, (greens_omega_N, n_iorb_R, ns_dets)]
         t_uH_c = uH_c(:nnz_max_u)
         call move_alloc(t_uH_c, uH_c)
 
-        call calc_sparse_dH(uH_p, uH_c, uH_v, n_coupled_dets, nnz_max_u,det_basis)
+        call calc_sparse_dH(uH_p, uH_c, uH_v, n_coupled_dets, nnz_max_u, det_basis)
         
         !!! compute an averaged wave function
         allocate(psi_coef_coupled_excited(n_coupled_dets, N_states))
@@ -363,13 +363,33 @@ BEGIN_PROVIDER [complex*16, greens_R, (greens_omega_N, n_iorb_R, ns_dets)]
                                         hash_beta hash_vals, hash_prime, hash_table_size)
         
         !!! proceed with lanczos iteration as normal
-        
-        
-        ! save only to first index 
-        lanczos_alpha_R = 0.0
-        lanczos_beta_R = 0.0
-        greens_R = (0.0, 0.0)
-        
+        call lanczos_tridiag_sparse_reortho_r(uH_v, uH_c, uH_p, psi_coef_coupled_excited(:,1),&
+                                                alpha, beta,&
+                                                lanczos_N, nnz_max_u, n_coupled_dets)
+
+        ! prepare beta array for continued fractions
+        bbeta(1) = (1.d0, 0.d0)
+        do i = 2, lanczos_N
+            bbeta(i) = -1.d0*beta(i)**2.0
+        end do
+
+        lanczos_alpha_R(:, iorb, i_n_det) = alpha
+        lanczos_beta_R(:, iorb, i_n_det) = real(bbeta)
+
+        epsilon = greens_epsilon ! broadening factor
+        E0 = psi_energy(1)
+        z = E0 - (-1.d0*greens_omega + (0.d0, 1.d0)*epsilon) ! omega is abs. energy value
+
+        ! save only to first index for now
+        ! calculate greens functions
+        !$OMP PARALLEL DO PRIVATE(i, zalpha) SHARED(alpha, bbeta, lanczos_N, greens_R)&
+        !$OMP SCHEDULE(GUIDED)
+        do i = 1, greens_omega_N
+            zalpha = z(i) - alpha
+            greens_R(i, 1, 1) = -1.d0*cfraction_c( (0.d0, 0.d0), bbeta, zalpha, lanczos_N)
+        end do
+        !$OMP END PARALLEL DO
+                
         ! clean up
         deallocate(uH_p, uH_c)
         deallocate(hash_value, hash_alpha, hash_beta)
