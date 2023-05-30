@@ -246,7 +246,7 @@ BEGIN_PROVIDER [complex*16, greens_R, (greens_omega_N, n_iorb_R, ns_dets)]
     ! variables specifically used for orbital coupling procedures
     logical                 :: orbital_coupling, hash_success
     integer                 :: hash_table_size, n_coupled_dets, hash_prime, nnz_max_u
-    integer, allocatable    :: I_cut_k(:,:), hash_value(:), H_e_all(:), t_H_e(:)
+    integer, allocatable    :: I_cut_k(:,:), hash_vals(:), H_e_all(:), t_H_e(:)
     integer, allocatable    :: uH_p(:), uH_c(:), uH_v(:), t_uH_c(:)
     integer(bit_kind), allocatable :: I_det_k(:,:,:,:), hash_alpha(:,:), hash_beta(:,:), det_basis(:,:,:), t_det_basis(:,:,:)
     double precision, allocatable  :: psi_coef_intrinsic_excited(:,:,:), psi_coef_coupled_excited(:,:)
@@ -315,10 +315,10 @@ BEGIN_PROVIDER [complex*16, greens_R, (greens_omega_N, n_iorb_R, ns_dets)]
         hash_prime = 8191
         n_coupled_dets = 0
 
-        allocate(hash_value(hash_table_size), hash_alpha(N_int, hash_table_size), hash_beta(N_int, hash_table_size))
+        allocate(hash_vals(hash_table_size), hash_alpha(N_int, hash_table_size), hash_beta(N_int, hash_table_size))
         allocate(det_basis(N_int, 2, N_det_l*n_iorb_R))
 
-        call build_hash_table(hash_alpha, hash_beta, hash_value, hash_prime, hash_table_size,&
+        call build_hash_table(hash_alpha, hash_beta, hash_vals, hash_prime, hash_table_size,&
                               I_cut_k, I_det_k, n_iorb_R, N_det_l, n_coupled_dets)
 
         allocate(t_det_basis(N_int, 2, n_coupled_dets))
@@ -345,7 +345,7 @@ BEGIN_PROVIDER [complex*16, greens_R, (greens_omega_N, n_iorb_R, ns_dets)]
         
         call uH_structure_from_gH(H_p_all, H_c_all, H_e_all, uH_p,uH_c,&
                             N_det_l, n_coupled_dets, nnz, nnz_max_u, n_iorb_R,&
-                            hash_alpha, hash_beta, hash_value, hash_prime, hash_table_size,&
+                            hash_alpha, hash_beta, hash_vals, hash_prime, hash_table_size,&
                             I_cut_k, I_det_k)
         
         nnz_max_u = uH_p(n_coupled_dets+1)-1
@@ -360,7 +360,7 @@ BEGIN_PROVIDER [complex*16, greens_R, (greens_omega_N, n_iorb_R, ns_dets)]
         allocate(psi_coef_coupled_excited(n_coupled_dets, N_states))
         call build_coupled_wavefunction(psi_coef_intrinsic_excited, psi_coef_coupled_excited, &
                                         I_det_k, N_det_l, n_coupled_dets, n_iorb_R, hash_alpha,&
-                                        hash_beta hash_vals, hash_prime, hash_table_size)
+                                        hash_beta, hash_vals, hash_prime, hash_table_size)
         
         !!! proceed with lanczos iteration as normal
         call lanczos_tridiag_sparse_reortho_r(uH_v, uH_c, uH_p, psi_coef_coupled_excited(:,1),&
@@ -392,7 +392,7 @@ BEGIN_PROVIDER [complex*16, greens_R, (greens_omega_N, n_iorb_R, ns_dets)]
                 
         ! clean up
         deallocate(uH_p, uH_c)
-        deallocate(hash_value, hash_alpha, hash_beta)
+        deallocate(hash_vals, hash_alpha, hash_beta)
         deallocate(I_cut_k, I_det_k, psi_coef_intrinsic_excited, psi_coef_coupled_excited)
     else
         ! loop over number of determinants 
@@ -1104,7 +1104,7 @@ subroutine build_R_wavefunction_complex(i_hole,ispin,coef_out, det_out, N_det_l,
     write(*, "(A20, I8, A1, I8)"), "Rank of N-1 space: ", rank, "/", N_det_l
 end
 
-subroutine build_coupled_wavefunction(psi_coef, coupled_psi_coef, I_det_k, N_det_s, N_det_t, n_iorb, hash_alpha, hash_beta, hash_vals, hash_prime, ht_size)
+subroutine build_coupled_wavefunction(intrinsic_psi_coef, coupled_psi_coef, I_det_k, N_det_s, N_det_t, n_iorb, hash_alpha, hash_beta, hash_vals, hash_prime, ht_size)
     implicit none
     BEGIN_DOC
 
@@ -1113,7 +1113,7 @@ subroutine build_coupled_wavefunction(psi_coef, coupled_psi_coef, I_det_k, N_det
     !! routine arguments
     integer, intent(in)           :: N_det_s, N_det_t, n_iorb, ht_size, hash_prime, hash_vals(ht_size)
     integer(bit_kind), intent(in) :: hash_alpha(N_int, ht_size), hash_beta(N_int, ht_size), I_det_k(N_int, 2, N_det_s, n_iorb)
-    double precision, intent(in)  :: psi_coef(N_det_s, N_states, n_iorb)
+    double precision, intent(in)  :: intrinsic_psi_coef(N_det_s, N_states, n_iorb)
 
     double precision, intent(out) :: coupled_psi_coef(N_det_t, N_states)
 
@@ -1133,11 +1133,11 @@ subroutine build_coupled_wavefunction(psi_coef, coupled_psi_coef, I_det_k, N_det
     do i = 1, n_iorb
         do j = 1, N_det_s
             target_row_det = I_det_k(:, :, j, i)
-            target_row = hash_value(hash_alpha, hash_beta, hash_vals, hash_prime, hash_table_size,&
+            target_row = hash_value(hash_alpha, hash_beta, hash_vals, hash_prime, ht_size,&
                          target_row_det(:,1), target_row_det(:,2))
 
             do k = 1, N_states
-                coupled_psi_coef(target_row, k) += psi_coef(j, k, i)
+                coupled_psi_coef(target_row, k) += intrinsic_psi_coef(j, k, i)
             end do
 
         end do
