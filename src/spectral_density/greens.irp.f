@@ -357,6 +357,10 @@ BEGIN_PROVIDER [complex*16, greens_R, (greens_omega_N, n_iorb_R, ns_dets)]
         call calc_sparse_dH(uH_p, uH_c, uH_v, n_coupled_dets, nnz_max_u,det_basis)
         
         !!! compute an averaged wave function
+        allocate(psi_coef_coupled_excited(n_coupled_dets, N_states))
+        call build_coupled_wavefunction(psi_coef_intrinsic_excited, psi_coef_coupled_excited, &
+                                        I_det_k, N_det_l, n_coupled_dets, n_iorb_R, hash_alpha,&
+                                        hash_beta hash_vals, hash_prime, hash_table_size)
         
         !!! proceed with lanczos iteration as normal
         
@@ -369,7 +373,7 @@ BEGIN_PROVIDER [complex*16, greens_R, (greens_omega_N, n_iorb_R, ns_dets)]
         ! clean up
         deallocate(uH_p, uH_c)
         deallocate(hash_value, hash_alpha, hash_beta)
-        deallocate(I_cut_k, I_det_k, psi_coef_intrinsic_excited)
+        deallocate(I_cut_k, I_det_k, psi_coef_intrinsic_excited, psi_coef_coupled_excited)
     else
         ! loop over number of determinants 
         do i_n_det = 1, ns_dets
@@ -1078,6 +1082,53 @@ subroutine build_R_wavefunction_complex(i_hole,ispin,coef_out, det_out, N_det_l,
       endif
     enddo
     write(*, "(A20, I8, A1, I8)"), "Rank of N-1 space: ", rank, "/", N_det_l
+end
+
+subroutine build_coupled_wavefunction(psi_coef, coupled_psi_coef, I_det_k, N_det_s, N_det_t, n_iorb, hash_alpha, hash_beta, hash_vals, hash_prime, ht_size)
+    implicit none
+    BEGIN_DOC
+
+    END_DOC
+
+    !! routine arguments
+    integer, intent(in)           :: N_det_s, N_det_t, n_iorb, ht_size, hash_prime, hash_vals(ht_size)
+    integer(bit_kind), intent(in) :: hash_alpha(N_int, ht_size), hash_beta(N_int, ht_size), I_det_k(N_int, 2, N_det_s, n_iorb)
+    double precision, intent(in)  :: psi_coef(N_det_s, N_states, n_iorb)
+
+    double precision, intent(out) :: coupled_psi_coef(N_det_t, N_states)
+
+    !! internal variables
+    integer           :: i, j, k, target_row
+    integer(bit_kind) :: target_row_det(N_int, 2)
+    double precision  :: norm
+    
+    !! function calls
+    integer           :: hash_value
+    double precision  :: dnrm2
+
+    ! initialize output wavefunction
+    coupled_psi_coef = 0.0
+
+    ! iterate over excitations, source determinants and sum coefficients by target generated deteterminant
+    do i = 1, n_iorb
+        do j = 1, N_det_s
+            target_row_det = I_det_k(:, :, j, i)
+            target_row = hash_value(hash_alpha, hash_beta, hash_vals, hash_prime, hash_table_size,&
+                         target_row_det(:,1), target_row_det(:,2))
+
+            do k = 1, N_states
+                coupled_psi_coef(target_row, k) += psi_coef(j, k, i)
+            end do
+
+        end do
+    end do
+
+    ! normalize wavefunction
+    do k = 1, N_states
+        norm = dnrm2(N_det_t, coupled_psi_coef(:,k), 1)
+        coupled_psi_coef(:, k) = coupled_psi_coef(:, k) / norm
+    end do
+
 end
 
 subroutine add_electron(key_in,i_particle,ispin,i_ok)
