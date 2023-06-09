@@ -297,6 +297,7 @@ BEGIN_PROVIDER [complex*16, greens_R, (greens_omega_N, n_iorb_R, ns_dets)]
         ! work on just the terminal number of determinants for now
         N_det_l = n_det_sequence(ns_dets) 
 
+        print *, "Constructing wave functions and I_cut_k, I_det_k"
         !! get all sets of I_cut, I_det, new wavefunctions
         allocate(I_cut_k(N_det_l, n_iorb_R), I_det_k(N_int, 2, N_det_l, n_iorb_R),&
                  psi_coef_intrinsic_excited(N_det_l, N_states, n_iorb_R))
@@ -311,16 +312,27 @@ BEGIN_PROVIDER [complex*16, greens_R, (greens_omega_N, n_iorb_R, ns_dets)]
         end do
 
         !! construct the hash table
-        hash_table_size = N_det_l * n_iorb_R
+        hash_table_size = 8192 !N_det_l * n_iorb_R
         hash_prime = 8191
-        n_coupled_dets = 0
+        ! n_coupled_dets = 1
 
         allocate(hash_vals(hash_table_size), hash_alpha(N_int, hash_table_size), hash_beta(N_int, hash_table_size))
-        allocate(det_basis(N_int, 2, N_det_l*n_iorb_R))
+        allocate(det_basis(N_int, 2, hash_table_size))
 
+        hash_alpha = 0
+        hash_beta = 0
+        hash_vals = 0
+        det_basis = 0
+
+        print *, "Building hash table with size: ", hash_table_size
+        
         call build_hash_table(hash_alpha, hash_beta, hash_vals, hash_prime, hash_table_size,&
-                              I_cut_k, I_det_k, n_iorb_R, N_det_l, n_coupled_dets)
+                              I_cut_k, I_det_k, n_iorb_R, N_det_l, det_basis, n_coupled_dets)
+        
+        print *, "Leaving hash table construction"
+        write(*, "(A30, I10)"), "Size of union space: ", n_coupled_dets
 
+        stop 3
         allocate(t_det_basis(N_int, 2, n_coupled_dets))
         t_det_basis = det_basis(:,:,:n_coupled_dets)
         call move_alloc(t_det_basis, det_basis)
