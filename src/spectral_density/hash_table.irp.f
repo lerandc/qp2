@@ -125,8 +125,8 @@ subroutine build_hash_table(hash_alpha, hash_beta, hash_vals, hash_prime, ht_siz
                                          I_det(:,1,i,iorb), I_det(:,2,i,iorb), n_det_out, hash_success)
 
                 if (hash_success) then
-                    n_det_out += 1
                     det_basis(:, :, n_det_out) = I_det(:,:,i,iorb)
+                    n_det_out += 1
                 end if
 
             end if
