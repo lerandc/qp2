@@ -295,6 +295,7 @@ BEGIN_PROVIDER [complex*16, greens_R, (greens_omega_N, n_iorb_R, ns_dets)]
 
     if (orbital_coupling == .true.) then
 
+        call set_ref_bitmask(iorb_R(iorb), 1, .true.)
         ! work on just the terminal number of determinants for now
         N_det_l = n_det_sequence(ns_dets) 
         
@@ -312,7 +313,6 @@ BEGIN_PROVIDER [complex*16, greens_R, (greens_omega_N, n_iorb_R, ns_dets)]
                                     )
         end do
                                 
-        call set_ref_bitmask(iorb_R(iorb), 1, .true.)
                                 
         !! construct the hash table
         hash_table_size = 8192 !N_det_l * n_iorb_R
@@ -369,6 +369,13 @@ BEGIN_PROVIDER [complex*16, greens_R, (greens_omega_N, n_iorb_R, ns_dets)]
         t_uH_c = uH_c(:nnz_max_u)
         call move_alloc(t_uH_c, uH_c)
 
+        do i = 1, n_coupled_dets
+            do j = uH_p(i), uH_p(i+1) - 1
+                if ((uH_c(j) < i) .or. (uH_c(j) > n_coupled_dets)) then
+                    write(*, '(I8, I8, I8)'), i, j, uH_c(j)
+                endif
+            end do
+        end do
         print *, "Calculating ", nnz_max_u, "matrix entries"
         call calc_sparse_dH(uH_p, uH_c, uH_v, n_coupled_dets, nnz_max_u, det_basis)
         
@@ -379,18 +386,13 @@ BEGIN_PROVIDER [complex*16, greens_R, (greens_omega_N, n_iorb_R, ns_dets)]
                                         hash_beta, hash_vals, hash_prime, hash_table_size)
         
 
-        do i = 1, n_coupled_dets
-            do j = uH_p(i), uH_p(i+1) - 1
-                if ((uH_c(j) < i) .or. (uH_c(j) > n_coupled_dets)) then
-                    write(*, '(I8, I8, I8)'), i, j, uH_c(j)
-                endif
-            end do
-        end do
         print *, "Beginning Lanczos iteration"
         !!! proceed with lanczos iteration as normal
         call lanczos_tridiag_sparse_reortho_r(uH_v, uH_c, uH_p, psi_coef_coupled_excited(:,1),&
                                                 alpha, beta,&
                                                 lanczos_N, nnz_max_u, n_coupled_dets)
+
+        print *, "Writing to disk"
 
         ! prepare beta array for continued fractions
         bbeta(1) = (1.d0, 0.d0)
@@ -398,8 +400,8 @@ BEGIN_PROVIDER [complex*16, greens_R, (greens_omega_N, n_iorb_R, ns_dets)]
             bbeta(i) = -1.d0*beta(i)**2.0
         end do
 
-        lanczos_alpha_R(:, iorb, i_n_det) = alpha
-        lanczos_beta_R(:, iorb, i_n_det) = real(bbeta)
+        lanczos_alpha_R(:, 1, 1) = alpha
+        lanczos_beta_R(:, 1, 1) = real(bbeta)
 
         epsilon = greens_epsilon ! broadening factor
         E0 = psi_energy(1)

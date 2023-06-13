@@ -1932,7 +1932,6 @@ subroutine calc_sparse_dH(H_p, H_c, H_v, sze, nnz, dets)
 
     H_v = 0.d0
 
-    ! force provide early so that threads don't each try to provide
     call i_H_j(dets(:,:,1), dets(:,:,1), N_int, hij) 
 
     !$OMP PARALLEL PRIVATE(i, j, hij) SHARED(H_c, H_p, H_v, sze, dets)
