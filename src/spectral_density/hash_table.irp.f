@@ -112,9 +112,9 @@ subroutine build_hash_table(hash_alpha, hash_beta, hash_vals, hash_prime, ht_siz
     integer(bit_kind), intent(out) :: det_basis(N_int, 2, ht_size)
     logical                 :: hash_success
 
-    integer :: i, iorb
+    integer :: i, iorb, hash_value, test_val
 
-    n_det_out = 0
+    n_det_out = 1
 
     ! iterate over each set of determinants in excitation order
     do iorb = 1, n_orb
@@ -133,5 +133,6 @@ subroutine build_hash_table(hash_alpha, hash_beta, hash_vals, hash_prime, ht_siz
         end do
     end do
 
+    n_det_out = n_det_out - 1 ! correct after last insertion
 
 end

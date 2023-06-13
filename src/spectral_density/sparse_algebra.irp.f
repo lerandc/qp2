@@ -688,6 +688,42 @@ subroutine get_sparsity_structure(csr_s, csr_c, sze, N_det_l)
 
 end
 
+subroutine write_degree(col, exc_degree)
+    implicit none
+    integer, intent(in) :: col, exc_degree
+    integer degree_a, degree_b
+    select case (exc_degree)
+    case (0)
+        degree_a = 0
+        degree_b = 0
+    case (1)
+        degree_a = 1
+        degree_b = 0
+    case (2)
+        degree_a = 2
+        degree_b = 0
+    case (3)
+        degree_a = 3
+        degree_b = 0
+    case (4)
+        degree_a = 0
+        degree_b = 1
+    case (5)
+        degree_a = 0
+        degree_b = 2
+    case (6)
+        degree_a = 1
+        degree_b = 1
+    case (7)
+        degree_a = 1
+        degree_b = 2
+    case (8)
+        degree_a = 2
+        degree_b = 1
+    end select
+    write(*, "(I8, I8, I8)"), col, degree_a, degree_b
+end
+
 subroutine get_sparsity_structure_with_triples(csr_s,csr_c,csr_e,sze,N_det_l)
     implicit none
     BEGIN_DOC
@@ -743,10 +779,11 @@ subroutine get_sparsity_structure_with_triples(csr_s,csr_c,csr_e,sze,N_det_l)
     do i = 1, N_det ! this loop needs to go over all the determinants, since this loop is not in determinant order but rather k_a order
         nnz = 0
         l_cols = 0
+        l_exc = 0
 
         ! check if row in N+1/N-1 determinant space
         ! if so, grab all the indices of all nonzero columns for that row in the upper half of H
-        call get_all_sparse_columns_with_triples(i,l_cols,l_exc,l_row,nnz,n_vals_row,N_det_l)
+        call get_all_sparse_columns_with_triples(i, l_cols, l_exc, l_row, nnz, n_vals_row, N_det_l)
 
         if (nnz == 0) cycle
 
@@ -764,7 +801,6 @@ subroutine get_sparsity_structure_with_triples(csr_s,csr_c,csr_e,sze,N_det_l)
             call move_alloc(coo_c_t, coo_c)
             call move_alloc(coo_e_t, coo_e)
         end if
-        
         
         ! Calculate nonzero entries and temperorarily store in COO format
         coo_n(l_row) = nnz ! store number of entries in row for later
@@ -803,7 +839,7 @@ subroutine get_sparsity_structure_with_triples(csr_s,csr_c,csr_e,sze,N_det_l)
     ! coo_*_all are in shared memory; since threads have disjoint work, this is safe
     coo_r_all(k+1:k+nnz_arr(ID)) = coo_r
     coo_c_all(k+1:k+nnz_arr(ID)) = coo_c
-    coo_c_all(k+1:k+nnz_arr(ID)) = coo_e
+    coo_e_all(k+1:k+nnz_arr(ID)) = coo_e
     !$OMP BARRIER
 
     ! calculate the starting index of each row in COO, since there is no sorting guarantee
@@ -864,8 +900,6 @@ subroutine get_sparsity_structure_with_triples(csr_s,csr_c,csr_e,sze,N_det_l)
 
 end
 
-
-
 subroutine uH_structure_from_gH(H_p, H_c, H_e, uH_p, uH_c, N_det_g, N_det_u,nnz_g,nnz_max,N_exc,&
                                 hash_alpha, hash_beta, hash_vals, hash_prime, hash_table_size,&
                                 I_cut_k, I_det_k)
@@ -886,7 +920,7 @@ subroutine uH_structure_from_gH(H_p, H_c, H_e, uH_p, uH_c, N_det_g, N_det_u,nnz_
     logical             :: hash_success
     
     integer, intent(in) :: I_cut_k(N_det_g, N_exc)
-    integer(bit_kind), intent(in)   :: I_det_k(N_int, 2, N_det_u, N_exc)
+    integer(bit_kind), intent(in)   :: I_det_k(N_int, 2, N_det_g, N_exc)
     
     !! output data
     integer, intent(out) :: uH_p(N_det_u+1), uH_c(nnz_max)
@@ -908,7 +942,7 @@ subroutine uH_structure_from_gH(H_p, H_c, H_e, uH_p, uH_c, N_det_g, N_det_u,nnz_
     integer              :: block_start, block_end, nts_block_start, nts_block_end, block_total, max_block_size
 
     integer, allocatable :: coo_r(:), coo_c(:), coo_n(:), coo_r_nts(:), coo_c_nts(:), coo_n_nts(:)
-    integer, allocatable :: u_coo_r(:), u_coo_c(:), u_coo_n(:)
+    integer, allocatable :: u_coo_r(:), u_coo_c(:), u_coo_n(:), u_block_rows(:,:)
     integer, allocatable :: coo_c_all(:), coo_n_all(:), nnz_arr(:,:), u_coo_n_all(:)
     integer, allocatable :: t_coo_r(:), t_coo_c(:), sort_idx(:)
     integer, allocatable :: row_starts(:), pointer_blocks(:)
@@ -921,7 +955,7 @@ subroutine uH_structure_from_gH(H_p, H_c, H_e, uH_p, uH_c, N_det_g, N_det_u,nnz_
     !$OMP PARALLEL DEFAULT(PRIVATE) SHARED(N_det_g, N_det_u, nnz_g, nnz_max, N_exc, H_p, H_c, H_e,&
     !$OMP                                  uH_p, uH_c, pointer_blocks, row_starts, target_N, n_threads,&
     !$OMP                                  hash_table_size, hash_prime, hash_alpha, hash_beta, hash_vals,&
-    !$OMP                                  I_cut_k, I_det_k, coo_c_all, coo_n_all, nnz_arr, umax_block_size)
+    !$OMP                                  I_cut_k, I_det_k, coo_c_all, coo_n_all, u_coo_n_all, nnz_arr, umax_block_size)
 
     ! hopefully default private works because this is verbose
     ! OpenMP C API doesn't seem to have private, so when adapting, you will have to do this
@@ -938,6 +972,9 @@ subroutine uH_structure_from_gH(H_p, H_c, H_e, uH_p, uH_c, N_det_g, N_det_u,nnz_
     !! calculate row partitions
     !$OMP SINGLE
     allocate(pointer_blocks(N_det_g+1), row_starts(n_threads+1), coo_n_all(N_det_u+1))
+    allocate(nnz_arr(N_det_u, n_threads+1))
+    nnz_arr = 0
+    nnz_arr(:, 1) = 1
     coo_n_all = 0
     pointer_blocks = 0
     row_starts = 0
@@ -977,6 +1014,10 @@ subroutine uH_structure_from_gH(H_p, H_c, H_e, uH_p, uH_c, N_det_g, N_det_u,nnz_
     
                   
     allocate(coo_r(8192), coo_c(8192), coo_n(N_det_u+1), coo_r_nts(8192), coo_c_nts(8192), coo_n_nts(N_det_u+1)) ! private
+    buffer_count = 0
+    nts_buffer_count = 0
+    coo_n = 0
+    coo_n_nts = 0
 
     !! this loop accomplishes the equivalent task as the loop over determinants in get_sparsity_structure()
     !! loop over excitation pairs
@@ -1004,7 +1045,7 @@ subroutine uH_structure_from_gH(H_p, H_c, H_e, uH_p, uH_c, N_det_g, N_det_u,nnz_
                     call move_alloc(t_coo_c, coo_c)
                 end if
                 
-                if (max_new_entries > (size(coo_r,1) - buffer_count - 100)) then ! reallocate unsorted buffer
+                if (max_new_entries > (size(coo_r_nts,1) - buffer_count - 100)) then ! reallocate unsorted buffer
                     allocate(t_coo_r(buffer_count + 4 *max_new_entries), t_coo_c(buffer_count + 4*max_new_entries))
     
                     t_coo_r(:buffer_count) = coo_r_nts
@@ -1015,8 +1056,12 @@ subroutine uH_structure_from_gH(H_p, H_c, H_e, uH_p, uH_c, N_det_g, N_det_u,nnz_
                 end if
 
                 target_row_det = I_det_k(:, :, row, i_exc)
-                target_row = hash_value(hash_alpha, hash_beta, hash_vals, hash_prime, hash_table_size,&
+                target_row = hash_value(hash_alpha, hash_beta, hash_vals, hash_prime, hash_table_size, N_exc,&
                                         target_row_det(:,1), target_row_det(:,2))
+
+                ! if (target_row == -1) then
+                !     print *,  "diag_ii", ID, i_exc, j_exc, row
+                ! end if
                 
                 !! handle diagonal excitations out of loop
                 if (i_exc == j_exc) then
@@ -1026,8 +1071,12 @@ subroutine uH_structure_from_gH(H_p, H_c, H_e, uH_p, uH_c, N_det_g, N_det_u,nnz_
                 else if (( j_exc > i_exc ) .and. ( I_cut_k(row, j_exc) == 1 )) then
                     
                     target_col_det = I_det_k(:, :, row, j_exc)
-                    target_col = hash_value(hash_alpha, hash_beta, hash_vals, hash_prime, hash_table_size,&
+                    target_col = hash_value(hash_alpha, hash_beta, hash_vals, hash_prime, hash_table_size, N_exc,&
                                             target_col_det(:,1), target_col_det(:,2))
+
+                    if (target_col == -1) then
+                        print *, "diag_ij", ID, i_exc, j_exc, row, target_row
+                    end if
                     
                     if (target_col < target_row) then
                         nts_buffer_count += 1
@@ -1050,10 +1099,14 @@ subroutine uH_structure_from_gH(H_p, H_c, H_e, uH_p, uH_c, N_det_g, N_det_u,nnz_
                     col = H_c(pidx)
 
                     
-                    if (I_cut_k(col, j_exc)) then
+                    if (I_cut_k(col, j_exc) == 1) then
                         target_col_det = I_det_k(:, :, col, j_exc)
-                        target_col = hash_value(hash_alpha, hash_beta, hash_vals,hash_prime, hash_table_size,&
+                        target_col = hash_value(hash_alpha, hash_beta, hash_vals, hash_prime, hash_table_size, N_exc,&
                                                 target_col_det(:,1), target_col_det(:,2))
+
+                        ! if (target_col == -1) then
+                        !     print *, "off_diag", ID, i_exc, j_exc, row, col
+                        ! end if
                         
                         cur_exc_degree = H_e(pidx)
 
@@ -1136,10 +1189,12 @@ subroutine uH_structure_from_gH(H_p, H_c, H_e, uH_p, uH_c, N_det_g, N_det_u,nnz_
     ! NTS is blocked by col, rows aren't sorted
     call double_sort(coo_r, coo_c, buffer_count, coo_n, N_det_u)
     call double_sort(coo_r_nts, coo_c_nts, nts_buffer_count, coo_n_nts, N_det_u)
-    
+
     ! combine buffers by row block
     buffer_total = nts_buffer_count + buffer_count
     allocate(u_coo_c(buffer_total), u_coo_n(N_det_u+1))
+    u_coo_c = 0
+    u_coo_n = 0
     u_coo_n(1) = 1
 
     ! scan block sizes to get a maximum block allocation
@@ -1154,38 +1209,49 @@ subroutine uH_structure_from_gH(H_p, H_c, H_e, uH_p, uH_c, N_det_g, N_det_u,nnz_
     do i = 1, N_det_u
         block_start = coo_n(i)
         block_end = coo_n(i+1)-1
-        nts_block_start = coo_n(i)
-        nts_block_end = coo_n(i-1)
-        
+        nts_block_start = coo_n_nts(i)
+        nts_block_end = coo_n_nts(i+1)-1
+
+        ! print *, i, block_start, block_end, nts_block_start, nts_block_end
         block_total = (coo_n(i+1) - coo_n(i)) + (coo_n_nts(i+1) - coo_n_nts(i))
 
-        ! combine blocks into buffer
-        t_coo_c(1 : coo_n(i+1) - coo_n(i)) = coo_c(block_start:block_end)
-        t_coo_c(coo_n(i+1) - coo_n(i) + 1 : block_total) = coo_c_nts(nts_block_start:nts_block_end)
+        if (block_total > 0) then
+            ! combine blocks into buffer
+            t_coo_c(1 : coo_n(i+1) - coo_n(i)) = coo_c(block_start:block_end)
+            t_coo_c(coo_n(i+1) - coo_n(i) + 1 : block_total) = coo_c_nts(nts_block_start:nts_block_end)
 
-        ! sort, then get unique entries
-        do j = 1, block_total
-            sort_idx(j) = j
-        end do
+            ! sort, then get unique entries
+            do j = 1, block_total
+                sort_idx(j) = j
+            end do
 
-        call insertion_isort(t_coo_c, sort_idx, block_total)
-        call unique_from_sorted_buffer(t_coo_c, block_total, ubuffer_total)
+            call insertion_isort(t_coo_c, sort_idx, block_total)
+            call unique_from_sorted_buffer(t_coo_c, block_total, ubuffer_total)
 
-        ! add into compact unique buffers
-        u_coo_n(i+1) = u_coo_n(i) + ubuffer_total
-        u_coo_c(u_coo_n(i):u_coo_n(i+1)-1) = t_coo_c
+            ! add into compact unique buffers
+            u_coo_n(i+1) = u_coo_n(i) + ubuffer_total
+            u_coo_c(u_coo_n(i):u_coo_n(i+1)-1) = t_coo_c
+
+            nnz_arr(i, ID+1) = ubuffer_total
+        else
+            u_coo_n(i+1) = u_coo_n(i)
+            nnz_arr(i, ID+1) = 0
+        end if
+
     end do
     deallocate(t_coo_c, sort_idx)
-    
-    
-    !! combine buffers into shared memory from unique components by task
 
-    ! sum reduce row block size by thread
-    do i = 1, N_det_u
-        nnz_arr(i, ID) = u_coo_n(i+1) - u_coo_n(i)
-    end do
     !$OMP SINGLE
+    coo_n_all = 0
     coo_n_all(1) = 1
+    !$OMP END SINGLE
+    allocate(u_block_rows(N_det_u, 2))
+    u_block_rows = 0
+    !$OMP BARRIER
+
+    !! combine buffers into shared memory from unique components by task
+    !$OMP SINGLE
+    print *, "reducing unique buffers into shared memory"
     !$OMP END SINGLE
     !$OMP BARRIER
 
@@ -1195,12 +1261,12 @@ subroutine uH_structure_from_gH(H_p, H_c, H_e, uH_p, uH_c, N_det_g, N_det_u,nnz_
         ! get total number in block across threads
         scn_a = 0
         !$OMP SIMD REDUCTION(inscan, +:scn_a)
-        do j = 1, n_threads
+        do j = 1, n_threads + 1
             scn_a = scn_a + nnz_arr(i, j)
             !$OMP SCAN INCLUSIVE(scn_a)
             nnz_arr(i, j) = scn_a
         end do
-        coo_n_all(i+1) = scn_a
+        coo_n_all(i+1) = scn_a - 1
     end do
     !$OMP END DO
     !$OMP BARRIER
@@ -1211,23 +1277,26 @@ subroutine uH_structure_from_gH(H_p, H_c, H_e, uH_p, uH_c, N_det_g, N_det_u,nnz_
     do i = 1, N_det_u+1
         scn_a = scn_a + coo_n_all(i)
         !$OMP SCAN INCLUSIVE(scn_a)
-        coo_n_all(i) = scn_a
+        coo_n_all(i) = scn_a 
+
     end do
     !$OMP END SINGLE
     !$OMP BARRIER
+    !TODO: better checking of the coo_n blocks, something might not be set correctly, but only seems 
+    ! to affect the end block
 
-    !$OMP DO SCHEDULE(GUIDED)
-    do i = 2, N_det_u+1
-        do j = 1, n_threads
-            nnz_arr(i,j) += coo_n_all(i) - 1
-        end do
+    do i = 1, N_det_u
+        u_block_rows(i, 1) = coo_n_all(i) + nnz_arr(i, ID) - 1
+        if (ID == n_threads) then
+            u_block_rows(i, 2) = coo_n_all(i+1)
+        else
+            u_block_rows(i, 2) = coo_n_all(i) + nnz_arr(i, ID + 1) - 1
+        end if
     end do
-    !$OMP END DO
 
     ! while work is finishing, allocate some arrays and get a buffer size for temp array allocation later
     !$OMP SINGLE
     allocate(u_coo_n_all(N_det_u), coo_c_all(coo_n_all(N_det_u+1)))
-    u_coo_n_all(1) = 1
     !$OMP END SINGLE
 
     !$OMP SINGLE
@@ -1236,6 +1305,7 @@ subroutine uH_structure_from_gH(H_p, H_c, H_e, uH_p, uH_c, N_det_g, N_det_u,nnz_
         kk = coo_n_all(i+1) - coo_n_all(i)
         umax_block_size = merge(kk, umax_block_size, kk > umax_block_size)
     end do
+    print *, "umax block size", umax_block_size
     !$OMP END SINGLE
 
     !$OMP BARRIER
@@ -1244,16 +1314,22 @@ subroutine uH_structure_from_gH(H_p, H_c, H_e, uH_p, uH_c, N_det_g, N_det_u,nnz_
     ! assemble into shared memory, then reduce to unique entries
     ! in future implementation, this could be done with RMA or other global address space schemes
     do i = 1, N_det_u - 1
-        block_start = nnz_arr(i, ID)
-        block_end = nnz_arr(i, modulo(ID+1, n_threads))
+        block_start = u_block_rows(i, 1)
+        block_end = u_block_rows(i, 2) - 1
+        
+        ! write(*, '(I4, I6, I8, I8, I8, I8, I8, I8)'), ID, i, block_start, block_end, block_end-block_start + 1, u_coo_n(i), u_coo_n(i+1), u_coo_n(i+1) - u_coo_n(i)
         coo_c_all(block_start:block_end) = u_coo_c(u_coo_n(i):u_coo_n(i+1)-1)
     end do
 
     !$OMP SINGLE
     ! since we're storing only the upper triangle, we can skip this is in the above loop
-    coo_c_all(coo_n_all(N_det_u):coo_n_all(N_det_u+1)-1) = N_det_u
+    coo_c_all(coo_n_all(N_det_u)) = N_det_u
     !$OMP END SINGLE
-    
+    !$OMP BARRIER
+
+    !$OMP SINGLE
+    print *, "Getting unique entries per shared row block"
+    !$OMP END SINGLE
     !$OMP BARRIER
 
     ! get unique entries per shared row block
@@ -1266,15 +1342,23 @@ subroutine uH_structure_from_gH(H_p, H_c, H_e, uH_p, uH_c, N_det_g, N_det_u,nnz_
 
         block_start = coo_n_all(i)
         block_end = coo_n_all(i+1) - 1
-        call insertion_isort(coo_c_all(block_start:block_end), sort_idx, block_end-block_start+1)
-        call unique_from_sorted_buffer(coo_c_all(block_start:block_end), block_end-block_start+1, ubuffer_total)
-
-        u_coo_n_all(i) = ubuffer_total
+        if ((block_end - block_start + 1) > 0) then
+            call insertion_isort(coo_c_all(block_start:block_end), sort_idx, block_end-block_start+1)
+            call unique_from_sorted_buffer(coo_c_all(block_start:block_end), block_end-block_start+1, ubuffer_total)
+            u_coo_n_all(i) = ubuffer_total
+        else
+            u_coo_n_all(i) = 0
+        end if
     end do
     !$OMP END DO
     deallocate(sort_idx)
-
     !$OMP BARRIER
+
+    !$OMP SINGLE
+    print *, "Assembling into CSR format"
+    !$OMP END SINGLE
+    !$OMP BARRIER
+
     !! assemble into CSR format
 
     ! set up row pointers
@@ -1299,13 +1383,14 @@ subroutine uH_structure_from_gH(H_p, H_c, H_e, uH_p, uH_c, N_det_g, N_det_u,nnz_
         uH_c(uH_p(i):uH_p(i+1)-1) = coo_c_all(block_start:block_end)
     end do
     !$OMP END DO
+    !$OMP BARRIER
 
     !! remaining clean up
     !$OMP SINGLE
-    deallocate(pointer_blocks, row_starts, coo_n_all, coo_c_all, u_coo_n_all)
+    deallocate(pointer_blocks, row_starts, coo_n_all, coo_c_all, u_coo_n_all, nnz_arr)
     !$OMP END SINGLE
 
-    deallocate(coo_r, coo_c, coo_n, coo_r_nts, coo_c_nts, coo_n_nts, u_coo_c, u_coo_n)
+    deallocate(coo_r, coo_c, coo_n, coo_r_nts, coo_c_nts, coo_n_nts, u_coo_c, u_coo_n, u_block_rows)
 
     !$OMP END PARALLEL
 end
@@ -1527,7 +1612,7 @@ subroutine get_all_sparse_columns(k_a, columns, row, nnz, nnz_max, N_det_l)
                 srt_idx, all_idx)
 end
 
-subroutine get_all_sparse_columns_with_triples( k_a, columns,exc_degree,row,nnz,nnz_max,N_det_l )
+subroutine get_all_sparse_columns_with_triples(k_a, columns, exc_degree, row, nnz, nnz_max, N_det_l)
     BEGIN_DOC
     ! Find all nonzero column indices belonging to row k_a in the bilinear matrix ordering
     !
@@ -1746,7 +1831,7 @@ subroutine get_all_sparse_columns_with_triples( k_a, columns,exc_degree,row,nnz,
             ! tmp_det(:,2) and tmp_det2(:,2) should be the same?
             tdegree_alpha = 0
             do k = 1, N_int
-                tdegree_alpha += popcnt(ieor(tmp_det(i,1), ref_det(i,1)))
+                tdegree_alpha += popcnt(ieor(tmp_det(k,1), ref_det(k,1)))
             end do
 
             ! add to triples buffer 
@@ -1931,7 +2016,7 @@ subroutine double_sort(rows, cols, n_max, row_starts, N_det_u)
     integer, intent(in)    :: n_max, N_det_u
     integer, intent(inout) :: rows(n_max), cols(n_max), row_starts(N_det_u+1)
 
-    integer :: i, j, cur_row, prev_row, n_rows, n_cols
+    integer :: i, j, cur_row, prev_row, n_cols
     integer, allocatable :: tcols(:), sort_idx(:)
 
 
@@ -1942,31 +2027,33 @@ subroutine double_sort(rows, cols, n_max, row_starts, N_det_u)
 
     call insertion_isort(rows, sort_idx, n_max) ! rows are sorted
   
-    ! sort cols by row 
+    ! sort cols by row, and calculate all row ptrs
     prev_row = rows(1)
-    n_rows = 1
-    row_starts(n_rows) = 1
+    row_starts(1) = 1
+    if (prev_row > 1) row_starts(:prev_row) = 1
+
     tcols = cols
     do i = 1, n_max 
-        cur_row = rows(i)
-        if (cur_row /= prev_row) then
-            n_rows += 1
-            row_starts(n_rows) = i
-        end if
         cols(i) = tcols(sort_idx(i))
 
-        prev_row = cur_row
+        cur_row = rows(i)
+        if (cur_row /= prev_row) then
+            row_starts(prev_row+1:cur_row) = i
+            prev_row = cur_row
+        end if
     end do
-    row_starts(n_rows+1) = n_max + 1
+    row_starts(cur_row+1:) = n_max + 1
 
     ! sort cols within row block
-    do i = 1, n_rows
+    do i = 1, N_det_u
         n_cols = row_starts(i+1) - row_starts(i)
         do j = 1, n_cols
             sort_idx(j) = j
         end do
 
-        call insertion_isort(cols(row_starts(i):row_starts(i+1)-1), sort_idx(:n_cols), n_cols)
+        if (n_cols > 0) then
+            call insertion_isort(cols(row_starts(i):row_starts(i+1)-1), sort_idx(:n_cols), n_cols)
+        end if
     end do
 
 

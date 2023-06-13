@@ -245,11 +245,12 @@ BEGIN_PROVIDER [complex*16, greens_R, (greens_omega_N, n_iorb_R, ns_dets)]
 
     ! variables specifically used for orbital coupling procedures
     logical                 :: orbital_coupling, hash_success
-    integer                 :: hash_table_size, n_coupled_dets, hash_prime, nnz_max_u
+    integer                 :: hash_table_size, n_coupled_dets, hash_prime, nnz_max_u, ref_count, ref_degree_a, ref_degree_b, test_degree_a, test_degree_b, j, k
     integer, allocatable    :: I_cut_k(:,:), hash_vals(:), H_e_all(:), t_H_e(:)
     integer, allocatable    :: uH_p(:), uH_c(:), uH_v(:), t_uH_c(:)
     integer(bit_kind), allocatable :: I_det_k(:,:,:,:), hash_alpha(:,:), hash_beta(:,:), det_basis(:,:,:), t_det_basis(:,:,:)
     double precision, allocatable  :: psi_coef_intrinsic_excited(:,:,:), psi_coef_coupled_excited(:,:)
+    integer :: hash_value, test_hash_val
 
     ! calculate the maximum size of the sparse arrays with some overflow protection
     ! could still be much improved
@@ -296,11 +297,11 @@ BEGIN_PROVIDER [complex*16, greens_R, (greens_omega_N, n_iorb_R, ns_dets)]
 
         ! work on just the terminal number of determinants for now
         N_det_l = n_det_sequence(ns_dets) 
-
+        
         print *, "Constructing wave functions and I_cut_k, I_det_k"
         !! get all sets of I_cut, I_det, new wavefunctions
         allocate(I_cut_k(N_det_l, n_iorb_R), I_det_k(N_int, 2, N_det_l, n_iorb_R),&
-                 psi_coef_intrinsic_excited(N_det_l, N_states, n_iorb_R))
+                    psi_coef_intrinsic_excited(N_det_l, N_states, n_iorb_R))
         do iorb = 1, n_iorb_R
 
             call build_R_wavefunction(iorb_R(iorb), 1, &
@@ -310,7 +311,9 @@ BEGIN_PROVIDER [complex*16, greens_R, (greens_omega_N, n_iorb_R, ns_dets)]
                                     I_cut_k(:,iorb),&
                                     )
         end do
-
+                                
+        call set_ref_bitmask(iorb_R(iorb), 1, .true.)
+                                
         !! construct the hash table
         hash_table_size = 8192 !N_det_l * n_iorb_R
         hash_prime = 8191
@@ -329,17 +332,17 @@ BEGIN_PROVIDER [complex*16, greens_R, (greens_omega_N, n_iorb_R, ns_dets)]
         call build_hash_table(hash_alpha, hash_beta, hash_vals, hash_prime, hash_table_size,&
                               I_cut_k, I_det_k, n_iorb_R, N_det_l, det_basis, n_coupled_dets)
         
-        print *, "Leaving hash table construction"
         write(*, "(A30, I10)"), "Size of union space: ", n_coupled_dets
 
-        stop 3
         allocate(t_det_basis(N_int, 2, n_coupled_dets))
         t_det_basis = det_basis(:,:,:n_coupled_dets)
         call move_alloc(t_det_basis, det_basis)
-
+        
+        print *, "Building ground state Hamiltonian"
+        allocate(H_p_all(N_det_l+1), H_c_all(s_max_sze), H_e_all(s_max_sze))
         !!! get ground state sparsity structure with triples and values corresponding to excitation degree
         call get_sparsity_structure_with_triples(H_p_all, H_c_all, H_e_all, s_max_sze, N_det_l)
-        
+        print *, "Ground state sparsity structure determined"
         ! shrink allocations
         nnz = H_p_all(N_det_l+1)-1
         
@@ -353,8 +356,8 @@ BEGIN_PROVIDER [complex*16, greens_R, (greens_omega_N, n_iorb_R, ns_dets)]
         ! heuristic maximum number of nonzero elements on the union space should be nnz with triples
         nnz_max_u = nnz
         
+        print *, "Constructing coupled matrix"
         allocate(uH_p(n_coupled_dets), uH_c(nnz_max_u))
-        
         call uH_structure_from_gH(H_p_all, H_c_all, H_e_all, uH_p,uH_c,&
                             N_det_l, n_coupled_dets, nnz, nnz_max_u, n_iorb_R,&
                             hash_alpha, hash_beta, hash_vals, hash_prime, hash_table_size,&
@@ -366,6 +369,7 @@ BEGIN_PROVIDER [complex*16, greens_R, (greens_omega_N, n_iorb_R, ns_dets)]
         t_uH_c = uH_c(:nnz_max_u)
         call move_alloc(t_uH_c, uH_c)
 
+        print *, "Calculating ", nnz_max_u, "matrix entries"
         call calc_sparse_dH(uH_p, uH_c, uH_v, n_coupled_dets, nnz_max_u, det_basis)
         
         !!! compute an averaged wave function
@@ -374,6 +378,15 @@ BEGIN_PROVIDER [complex*16, greens_R, (greens_omega_N, n_iorb_R, ns_dets)]
                                         I_det_k, N_det_l, n_coupled_dets, n_iorb_R, hash_alpha,&
                                         hash_beta, hash_vals, hash_prime, hash_table_size)
         
+
+        do i = 1, n_coupled_dets
+            do j = uH_p(i), uH_p(i+1) - 1
+                if ((uH_c(j) < i) .or. (uH_c(j) > n_coupled_dets)) then
+                    write(*, '(I8, I8, I8)'), i, j, uH_c(j)
+                endif
+            end do
+        end do
+        print *, "Beginning Lanczos iteration"
         !!! proceed with lanczos iteration as normal
         call lanczos_tridiag_sparse_reortho_r(uH_v, uH_c, uH_p, psi_coef_coupled_excited(:,1),&
                                                 alpha, beta,&
@@ -403,6 +416,7 @@ BEGIN_PROVIDER [complex*16, greens_R, (greens_omega_N, n_iorb_R, ns_dets)]
         !$OMP END PARALLEL DO
                 
         ! clean up
+        deallocate(H_p_all, H_c_all, H_e_all)
         deallocate(uH_p, uH_c)
         deallocate(hash_vals, hash_alpha, hash_beta)
         deallocate(I_cut_k, I_det_k, psi_coef_intrinsic_excited, psi_coef_coupled_excited)
@@ -1145,7 +1159,7 @@ subroutine build_coupled_wavefunction(intrinsic_psi_coef, coupled_psi_coef, I_de
     do i = 1, n_iorb
         do j = 1, N_det_s
             target_row_det = I_det_k(:, :, j, i)
-            target_row = hash_value(hash_alpha, hash_beta, hash_vals, hash_prime, ht_size,&
+            target_row = hash_value(hash_alpha, hash_beta, hash_vals, hash_prime, ht_size, n_iorb, &
                          target_row_det(:,1), target_row_det(:,2))
 
             do k = 1, N_states
