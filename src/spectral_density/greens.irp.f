@@ -104,7 +104,7 @@ BEGIN_PROVIDER [complex*16, greens_A, (greens_omega_N, n_iorb_A, ns_dets)]
                 ' and ', N_det_l, ' determinants'
 
             ! reset bit masks
-            call set_ref_bitmask(iorb_A(iorb), 1, .false.)
+            call set_ref_bitmask(1, .false.)
 
             ! prepare orthonormal wavefunction in space of N+1 determinants
             ! add electron to orbital
@@ -247,10 +247,12 @@ BEGIN_PROVIDER [complex*16, greens_R, (greens_omega_N, n_iorb_R, ns_dets)]
     logical                 :: orbital_coupling, hash_success
     integer                 :: hash_table_size, n_coupled_dets, hash_prime, nnz_max_u, ref_count, ref_degree_a, ref_degree_b, test_degree_a, test_degree_b, j, k
     integer, allocatable    :: I_cut_k(:,:), hash_vals(:), H_e_all(:), t_H_e(:)
-    integer, allocatable    :: uH_p(:), uH_c(:), uH_v(:), t_uH_c(:)
+    integer, allocatable    :: uH_p(:), uH_c(:), t_uH_c(:)
+    double precision, allocatable ::  uH_v(:)
     integer(bit_kind), allocatable :: I_det_k(:,:,:,:), hash_alpha(:,:), hash_beta(:,:), det_basis(:,:,:), t_det_basis(:,:,:)
     double precision, allocatable  :: psi_coef_intrinsic_excited(:,:,:), psi_coef_coupled_excited(:,:)
-    integer :: hash_value, test_hash_val
+    integer :: hash_value, test_col, mem_err
+    double precision :: test_val
 
     ! calculate the maximum size of the sparse arrays with some overflow protection
     ! could still be much improved
@@ -289,20 +291,27 @@ BEGIN_PROVIDER [complex*16, greens_R, (greens_omega_N, n_iorb_R, ns_dets)]
     
     if (modulo(ns_dets, 5) > 0) write(*,*)," "
     
-    greens_R = (0.d0, 0.d0)
+    ! greens_R = (0.d0, 0.d0)
 
     orbital_coupling = .true.
 
     if (orbital_coupling == .true.) then
 
-        call set_ref_bitmask(iorb_R(iorb), 1, .true.)
+        call set_ref_bitmask(1, .true.)
         ! work on just the terminal number of determinants for now
         N_det_l = n_det_sequence(ns_dets) 
         
-        print *, "Constructing wave functions and I_cut_k, I_det_k"
+        t0 = 0.0
+        t1 = 0.0
+        call wall_time(t0)
+
         !! get all sets of I_cut, I_det, new wavefunctions
         allocate(I_cut_k(N_det_l, n_iorb_R), I_det_k(N_int, 2, N_det_l, n_iorb_R),&
-                    psi_coef_intrinsic_excited(N_det_l, N_states, n_iorb_R))
+                    psi_coef_intrinsic_excited(N_det_l, N_states, n_iorb_R), stat=mem_err)
+
+        ! if(mem_err /= 0) then
+        !     print *, "Allocation failed at before build_R_wavefunction"
+        ! end if
         do iorb = 1, n_iorb_R
 
             call build_R_wavefunction(iorb_R(iorb), 1, &
@@ -317,82 +326,94 @@ BEGIN_PROVIDER [complex*16, greens_R, (greens_omega_N, n_iorb_R, ns_dets)]
         !! construct the hash table
         hash_table_size = 8192 !N_det_l * n_iorb_R
         hash_prime = 8191
-        ! n_coupled_dets = 1
 
-        allocate(hash_vals(hash_table_size), hash_alpha(N_int, hash_table_size), hash_beta(N_int, hash_table_size))
-        allocate(det_basis(N_int, 2, hash_table_size))
+        allocate(hash_vals(hash_table_size), hash_alpha(N_int, hash_table_size), hash_beta(N_int, hash_table_size), stat=mem_err)
+        allocate(det_basis(N_int, 2, hash_table_size), stat=mem_err)
 
         hash_alpha = 0
         hash_beta = 0
         hash_vals = 0
         det_basis = 0
 
-        print *, "Building hash table with size: ", hash_table_size
-        
         call build_hash_table(hash_alpha, hash_beta, hash_vals, hash_prime, hash_table_size,&
                               I_cut_k, I_det_k, n_iorb_R, N_det_l, det_basis, n_coupled_dets)
-        
+    
+        allocate(t_det_basis(N_int, 2, n_coupled_dets), stat=mem_err)
+        t_det_basis(:,:,:n_coupled_dets) = det_basis(:,:,:n_coupled_dets)
+        call move_alloc(t_det_basis, det_basis, stat=mem_err)
+
+        call wall_time(t1)
+        write(*, "(A42, F8.2, A10)"), "Union space basis and hash table built in ", t1-t0, " seconds"
         write(*, "(A30, I10)"), "Size of union space: ", n_coupled_dets
 
-        allocate(t_det_basis(N_int, 2, n_coupled_dets))
-        t_det_basis = det_basis(:,:,:n_coupled_dets)
-        call move_alloc(t_det_basis, det_basis)
-        
         print *, "Building ground state Hamiltonian"
+        call wall_time(t0)
         allocate(H_p_all(N_det_l+1), H_c_all(s_max_sze), H_e_all(s_max_sze))
+
         !!! get ground state sparsity structure with triples and values corresponding to excitation degree
         call get_sparsity_structure_with_triples(H_p_all, H_c_all, H_e_all, s_max_sze, N_det_l)
-        print *, "Ground state sparsity structure determined"
         ! shrink allocations
         nnz = H_p_all(N_det_l+1)-1
         
-        allocate(t_H_c(nnz), t_H_e(nnz))
-        t_H_c = H_c_all(:nnz)
-        t_H_e = H_e_all(:nnz)
-        call move_alloc(t_H_c, H_c_all)
-        call move_alloc(t_H_e, H_e_all)
+        allocate(t_H_c(nnz), t_H_e(nnz), stat=mem_err)
+        t_H_c(:nnz) = H_c_all(:nnz)
+        t_H_e(:nnz) = H_e_all(:nnz)
+        call move_alloc(t_H_c, H_c_all, stat=mem_err)
+        call move_alloc(t_H_e, H_e_all, stat=mem_err)
+        
+        call wall_time(t1)
+        write(*, "(A58, F8.2, A10)"), "Ground state sparsity structure with triples built in ", t1-t0, " seconds"
         
         !!! construct sparse hamiltonian on coupled excitation space
         ! heuristic maximum number of nonzero elements on the union space should be nnz with triples
-        nnz_max_u = nnz
-        
         print *, "Constructing coupled matrix"
-        allocate(uH_p(n_coupled_dets), uH_c(nnz_max_u))
-        call uH_structure_from_gH(H_p_all, H_c_all, H_e_all, uH_p,uH_c,&
+        call wall_time(t0)
+        nnz_max_u = 2*nnz
+        allocate(uH_p(n_coupled_dets+1), uH_c(nnz_max_u), stat=mem_err)
+        ! if(mem_err /= 0) then
+        !     print *, "Allocation failed for union state matrix"
+        ! end if
+        call uH_structure_from_gH(H_p_all, H_c_all, H_e_all, uH_p, uH_c,&
                             N_det_l, n_coupled_dets, nnz, nnz_max_u, n_iorb_R,&
                             hash_alpha, hash_beta, hash_vals, hash_prime, hash_table_size,&
                             I_cut_k, I_det_k)
-        
-        nnz_max_u = uH_p(n_coupled_dets+1)-1
-        
-        allocate(t_uH_c(nnz_max_u), uH_v(nnz_max_u))
-        t_uH_c = uH_c(:nnz_max_u)
-        call move_alloc(t_uH_c, uH_c)
 
-        do i = 1, n_coupled_dets
-            do j = uH_p(i), uH_p(i+1) - 1
-                if ((uH_c(j) < i) .or. (uH_c(j) > n_coupled_dets)) then
-                    write(*, '(I8, I8, I8)'), i, j, uH_c(j)
-                endif
-            end do
-        end do
-        print *, "Calculating ", nnz_max_u, "matrix entries"
-        call calc_sparse_dH(uH_p, uH_c, uH_v, n_coupled_dets, nnz_max_u, det_basis)
+        nnz_max_u = uH_p(n_coupled_dets+1)-1
+        allocate(t_uH_c(nnz_max_u), uH_v(nnz_max_u), stat=mem_err)
+        t_uH_c(:nnz_max_u) = uH_c(:nnz_max_u)
+        call move_alloc(t_uH_c, uH_c, stat=mem_err)
+        
+        call wall_time(t1)
+        write(*, "(A50, F8.2, A15, I12, A8)"), "Coupled state H generated from ground state in ", t1-t0, " seconds with ", nnz_max_u, " entries"
         
         !!! compute an averaged wave function
-        allocate(psi_coef_coupled_excited(n_coupled_dets, N_states))
+        call wall_time(t0)
+        print *, "Calculating matrix entries"
+        call calc_sparse_dH(uH_p, uH_c, uH_v, n_coupled_dets, nnz_max_u, det_basis)
+        
+        print *, "Building coupled wavefunction"
+        allocate(psi_coef_coupled_excited(n_coupled_dets, N_states), stat=mem_err)
+        psi_coef_coupled_excited = 0.d0
         call build_coupled_wavefunction(psi_coef_intrinsic_excited, psi_coef_coupled_excited, &
-                                        I_det_k, N_det_l, n_coupled_dets, n_iorb_R, hash_alpha,&
+                                        I_cut_k, I_det_k, N_det_l, n_coupled_dets, n_iorb_R, hash_alpha,&
                                         hash_beta, hash_vals, hash_prime, hash_table_size)
         
+        call wall_time(t1)
+        write(*, "(A60, F8.2, A10)"), "Coupled state entries and excited wavefunction calculated in ", t1-t0, " seconds"
 
         print *, "Beginning Lanczos iteration"
+        call wall_time(t0)
         !!! proceed with lanczos iteration as normal
         call lanczos_tridiag_sparse_reortho_r(uH_v, uH_c, uH_p, psi_coef_coupled_excited(:,1),&
                                                 alpha, beta,&
                                                 lanczos_N, nnz_max_u, n_coupled_dets)
 
-        print *, "Writing to disk"
+        call wall_time(t1)
+        write(*, "(A21, F8.2, A10)"), "Lanczos iteration in ", t1-t0, " seconds"
+
+        lanczos_alpha_R = 0.d0
+        lanczos_beta_R = 0.d0
+        greens_R = (0.d0, 0.d0)
 
         ! prepare beta array for continued fractions
         bbeta(1) = (1.d0, 0.d0)
@@ -400,6 +421,7 @@ BEGIN_PROVIDER [complex*16, greens_R, (greens_omega_N, n_iorb_R, ns_dets)]
             bbeta(i) = -1.d0*beta(i)**2.0
         end do
 
+        ! save only to first index for now
         lanczos_alpha_R(:, 1, 1) = alpha
         lanczos_beta_R(:, 1, 1) = real(bbeta)
 
@@ -407,7 +429,6 @@ BEGIN_PROVIDER [complex*16, greens_R, (greens_omega_N, n_iorb_R, ns_dets)]
         E0 = psi_energy(1)
         z = E0 - (-1.d0*greens_omega + (0.d0, 1.d0)*epsilon) ! omega is abs. energy value
 
-        ! save only to first index for now
         ! calculate greens functions
         !$OMP PARALLEL DO PRIVATE(i, zalpha) SHARED(alpha, bbeta, lanczos_N, greens_R)&
         !$OMP SCHEDULE(GUIDED)
@@ -418,10 +439,9 @@ BEGIN_PROVIDER [complex*16, greens_R, (greens_omega_N, n_iorb_R, ns_dets)]
         !$OMP END PARALLEL DO
                 
         ! clean up
-        deallocate(H_p_all, H_c_all, H_e_all)
-        deallocate(uH_p, uH_c)
+        deallocate(H_p_all, H_c_all, H_e_all, uH_p, uH_c, uH_v)
         deallocate(hash_vals, hash_alpha, hash_beta)
-        deallocate(I_cut_k, I_det_k, psi_coef_intrinsic_excited, psi_coef_coupled_excited)
+        deallocate(det_basis, I_cut_k, I_det_k, psi_coef_intrinsic_excited, psi_coef_coupled_excited)
     else
         ! loop over number of determinants 
         do i_n_det = 1, ns_dets
@@ -452,7 +472,7 @@ BEGIN_PROVIDER [complex*16, greens_R, (greens_omega_N, n_iorb_R, ns_dets)]
                     ' and ', N_det_l, ' determinants'
 
                 ! reset bit masks
-                call set_ref_bitmask(iorb_R(iorb), 1, .true.)
+                call set_ref_bitmask(1, .true.)
 
                 ! prepare orthonormal wavefunction in space of N-1 determinants
                 ! remove electron from orbital
@@ -669,7 +689,7 @@ BEGIN_PROVIDER [complex*16, greens_A_complex, (greens_omega_N, n_iorb_A,ns_dets)
                 '#### Calculating density for iorb ', iorb_A(iorb),&
                 ' and ', N_det_l, ' determinants'
 
-            call set_ref_bitmask_complex(iorb_A(iorb), 1, .false.)
+            call set_ref_bitmask_complex(1, .false.)
         
             ! prepare orthonormal wavefunction in space of N+1 determinants
             ! add electron to orbital
@@ -867,7 +887,7 @@ BEGIN_PROVIDER [complex*16, greens_R_complex, (greens_omega_N, n_iorb_R,ns_dets)
                 '#### Calculating density for iorb ', iorb_R(iorb),&
                 ' and ', N_det_l, ' determinants'
 
-            call set_ref_bitmask_complex(iorb_R(iorb), 1, .true.)
+            call set_ref_bitmask_complex(1, .true.)
         
             ! prepare orthonormal wavefunction in space of N-1 determinants
             ! remove electron from orbital
@@ -1132,14 +1152,14 @@ subroutine build_R_wavefunction_complex(i_hole,ispin,coef_out, det_out, N_det_l,
     write(*, "(A20, I8, A1, I8)"), "Rank of N-1 space: ", rank, "/", N_det_l
 end
 
-subroutine build_coupled_wavefunction(intrinsic_psi_coef, coupled_psi_coef, I_det_k, N_det_s, N_det_t, n_iorb, hash_alpha, hash_beta, hash_vals, hash_prime, ht_size)
+subroutine build_coupled_wavefunction(intrinsic_psi_coef, coupled_psi_coef, I_cut_k, I_det_k, N_det_s, N_det_t, n_iorb, hash_alpha, hash_beta, hash_vals, hash_prime, ht_size)
     implicit none
     BEGIN_DOC
 
     END_DOC
 
     !! routine arguments
-    integer, intent(in)           :: N_det_s, N_det_t, n_iorb, ht_size, hash_prime, hash_vals(ht_size)
+    integer, intent(in)           :: N_det_s, N_det_t, n_iorb, ht_size, hash_prime, hash_vals(ht_size), I_cut_k(N_det_s, n_iorb)
     integer(bit_kind), intent(in) :: hash_alpha(N_int, ht_size), hash_beta(N_int, ht_size), I_det_k(N_int, 2, N_det_s, n_iorb)
     double precision, intent(in)  :: intrinsic_psi_coef(N_det_s, N_states, n_iorb)
 
@@ -1160,14 +1180,15 @@ subroutine build_coupled_wavefunction(intrinsic_psi_coef, coupled_psi_coef, I_de
     ! iterate over excitations, source determinants and sum coefficients by target generated deteterminant
     do i = 1, n_iorb
         do j = 1, N_det_s
-            target_row_det = I_det_k(:, :, j, i)
-            target_row = hash_value(hash_alpha, hash_beta, hash_vals, hash_prime, ht_size, n_iorb, &
-                         target_row_det(:,1), target_row_det(:,2))
+            if (I_cut_k(j, i) == 1) then
+                target_row_det = I_det_k(:, :, j, i)
+                target_row = hash_value(hash_alpha, hash_beta, hash_vals, hash_prime, ht_size, n_iorb, &
+                            target_row_det(:,1), target_row_det(:,2))
 
-            do k = 1, N_states
-                coupled_psi_coef(target_row, k) += intrinsic_psi_coef(j, k, i)
-            end do
-
+                do k = 1, N_states
+                    coupled_psi_coef(target_row, k) += intrinsic_psi_coef(j, k, i)
+                end do
+            end if
         end do
     end do
 
@@ -1281,7 +1302,7 @@ subroutine get_phase_ca(det, iorb, ispin, phase)
     phase = phase_dble(iand(N_perm, 1))
 end
 
-subroutine set_ref_bitmask(iorb, ispin, ac_type)
+subroutine set_ref_bitmask(ispin, ac_type)
     implicit none
     BEGIN_DOC
     ! Reset the bitmask and bitmask energy for added/removed electron
@@ -1291,7 +1312,7 @@ subroutine set_ref_bitmask(iorb, ispin, ac_type)
     END_DOC
 
     integer :: i, j, a, b, occ(N_int*bit_kind_size,2)
-    integer, intent(in)  :: iorb, ispin
+    integer, intent(in)  :: ispin
     logical, intent(in)  :: ac_type
     integer, allocatable :: t_occ(:)
 
@@ -1363,11 +1384,12 @@ subroutine set_ref_bitmask(iorb, ispin, ac_type)
     end do
 
     !! Force provides for single excitation things
-    PROVIDE fock_op_cshell_ref_bitmask
+    call provide_fock_op_cshell_ref_bitmask
+    ! PROVIDE fock_op_cshell_ref_bitmask
 end
 
 
-subroutine set_ref_bitmask_complex(iorb, ispin, ac_type)
+subroutine set_ref_bitmask_complex(ispin, ac_type)
     implicit none
     BEGIN_DOC
     ! Reset the bitmask and bitmask energy for added/removed electron
@@ -1378,7 +1400,7 @@ subroutine set_ref_bitmask_complex(iorb, ispin, ac_type)
 
     integer :: i, j, k, a, b, occ(N_int*bit_kind_size,2), kpt, korb
     integer :: n_occ_ab(2)
-    integer, intent(in)  :: iorb, ispin
+    integer, intent(in)  :: ispin
     logical, intent(in)  :: ac_type
     integer, allocatable :: t_occ(:)
 

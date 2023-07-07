@@ -546,11 +546,13 @@ subroutine get_sparsity_structure(csr_s, csr_c, sze, N_det_l)
     !$OMP                 coo_r_all, coo_c_all, csr_s, csr_c, coo_s, coo_n)& 
     !$OMP PRIVATE(i, j , old_row, k, ii, kk, scn_a, ID, nnz, nnz_cnt, coo_r, coo_c, coo_r_t, coo_c_t, l_cols, l_row) 
 
-    !$ n_threads = OMP_get_num_threads()
     !$ ID = OMP_get_thread_num() + 1
-
+    
     !$OMP SINGLE
+    !$ n_threads = OMP_get_num_threads()
     allocate(coo_s(N_det_l), coo_n(N_det_l))
+    allocate(nnz_arr(n_threads))
+    nnz_tot = 0
     coo_n = 0
     !$OMP END SINGLE
     !$OMP BARRIER
@@ -558,17 +560,12 @@ subroutine get_sparsity_structure(csr_s, csr_c, sze, N_det_l)
     ! initial allocation sizes for vectors
     frac = 0.2
     n_vals = max(nint(N_det_l*N_det_l*frac/n_threads), 128)
-    n_vals_row = nnz_max_per_row
+    n_vals_row = min(N_det_l, nnz_max_per_row)
 
     allocate(coo_r(n_vals))
     allocate(coo_c(n_vals))
     allocate(l_cols(n_vals_row))
-    
-    !$OMP SINGLE
-    allocate(nnz_arr(n_threads))
-    nnz_tot = 0
-    !$OMP END SINGLE
-    
+        
     nnz_cnt = 0
     !$OMP DO SCHEDULE(GUIDED)
     do i = 1, N_det ! this loop needs to go over all the determinants, since this loop is not in determinant order but rather k_a order
@@ -582,12 +579,12 @@ subroutine get_sparsity_structure(csr_s, csr_c, sze, N_det_l)
         if (nnz == 0) cycle
 
         ! reallocate arrays if necessary
-        if (nnz_cnt + nnz > size(coo_r, 1)) then
+        if ((nnz_cnt + nnz) > size(coo_r, 1)) then
             allocate(coo_r_t(nnz_cnt + 10*nnz))
             allocate(coo_c_t(nnz_cnt + 10*nnz))
             
-            coo_r_t(:nnz_cnt) = coo_r
-            coo_c_t(:nnz_cnt) = coo_c
+            coo_r_t(:nnz_cnt) = coo_r(:nnz_cnt)
+            coo_c_t(:nnz_cnt) = coo_c(:nnz_cnt)
             
             call move_alloc(coo_r_t, coo_r)
             call move_alloc(coo_c_t, coo_c)
@@ -627,8 +624,8 @@ subroutine get_sparsity_structure(csr_s, csr_c, sze, N_det_l)
     end do
 
     ! coo_*_all are in shared memory; since threads have disjoint work, this is safe
-    coo_r_all(k+1:k+nnz_arr(ID)) = coo_r
-    coo_c_all(k+1:k+nnz_arr(ID)) = coo_c
+    coo_r_all(k+1:k+nnz_arr(ID)) = coo_r(:nnz_cnt)
+    coo_c_all(k+1:k+nnz_arr(ID)) = coo_c(:nnz_cnt)
     !$OMP BARRIER
 
     ! calculate the starting index of each row in COO, since there is no sorting guarantee
@@ -675,7 +672,7 @@ subroutine get_sparsity_structure(csr_s, csr_c, sze, N_det_l)
     ! loop through rows and construct CSR matrix from COO temp arrays
     !$OMP DO SCHEDULE(GUIDED)
     do i = 1, N_det_l
-        csr_c(csr_s(i):csr_s(i+1)-1) = coo_c_all(coo_s(i):coo_s(i+1)-1)
+        csr_c(csr_s(i):csr_s(i+1)-1) = coo_c_all(coo_s(i):coo_s(i) + (csr_s(i+1) - csr_s(i) - 1))
     end do
     !$OMP END DO
 
@@ -741,39 +738,37 @@ subroutine get_sparsity_structure_with_triples(csr_s,csr_c,csr_e,sze,N_det_l)
     integer(kind=8), intent(in)        :: sze
     integer, intent(out)          :: csr_s(N_det_l+1), csr_c(sze), csr_e(sze)
 
-    integer              :: n, i, j, k, l_row, old_row
+    integer              :: i, j, k, ii, kk,  l_row, old_row
     integer              :: nnz, nnz_cnt, nnz_tot
     integer              :: n_vals, n_vals_row, n_threads, ID
-    integer              :: nnz_csr, ii, scn_a, kk
+    integer              :: nnz_csr, scn_a, stat
     integer :: OMP_get_num_threads, OMP_get_thread_num
     integer, allocatable :: nnz_arr(:), coo_r(:), coo_c(:), coo_e(:), l_cols(:), l_exc(:)
     integer, allocatable :: coo_r_all(:), coo_c_all(:), coo_e_all(:), coo_r_t(:), coo_c_t(:), coo_e_t(:)
-    integer, allocatable:: coo_s(:), coo_n(:)
+    integer, allocatable :: coo_s(:), coo_n(:)
     double precision     :: frac
     
-
     !$OMP PARALLEL SHARED(nnz_tot, nnz_arr, nnz_csr, n_threads, N_det, N_det_l, nnz_max_per_row, n_vals_row,&
-    !$OMP                 coo_r_all, coo_c_all, coo_e_all, csr_s, csr_c, csr_e, coo_s, coo_n)& 
-    !$OMP PRIVATE(i,j,old_row, k,ii,kk, scn_a, ID, nnz, nnz_cnt, coo_r, coo_c, coo_e, coo_r_t, coo_c_t, coo_e_t, l_cols, l_exc, l_row) 
+    !$OMP                 coo_r_all, coo_c_all, coo_e_all, csr_s, csr_c, csr_e, coo_s, coo_n, sze)& 
+    !$OMP PRIVATE(stat, i,j,k,ii,kk,old_row, scn_a, ID, nnz, nnz_cnt, coo_r, coo_c, coo_e, coo_r_t, coo_c_t, coo_e_t, l_cols, l_exc, l_row, frac) 
 
-    !$ n_threads = OMP_get_num_threads()
     !$ ID = OMP_get_thread_num() + 1
-
+    
     !$OMP SINGLE
-    allocate(coo_s(N_det_l), coo_n(N_det_l))
+    !$ n_threads = OMP_get_num_threads()
     allocate(nnz_arr(n_threads))
+    allocate(coo_s(N_det_l))
+    allocate(coo_n(N_det_l))
     coo_n = 0
     nnz_tot = 0
     !$OMP END SINGLE
-    !$OMP BARRIER
-
-    ! initial allocation sizes for vectors
+    
+    ! ! initial allocation sizes for vectors
     frac = 0.2
     n_vals = max(nint(N_det_l*N_det_l*frac/n_threads), 128)
-    n_vals_row = nnz_max_per_row
+    n_vals_row = min(N_det_l, nnz_max_per_row)
 
     allocate(coo_r(n_vals), coo_c(n_vals), coo_e(n_vals), l_cols(n_vals_row), l_exc(n_vals_row))
-    
     nnz_cnt = 0
     !$OMP DO SCHEDULE(GUIDED)
     do i = 1, N_det ! this loop needs to go over all the determinants, since this loop is not in determinant order but rather k_a order
@@ -788,14 +783,14 @@ subroutine get_sparsity_structure_with_triples(csr_s,csr_c,csr_e,sze,N_det_l)
         if (nnz == 0) cycle
 
         ! reallocate arrays if necessary
-        if (nnz_cnt + nnz > size(coo_r, 1)) then
+        if ((nnz_cnt + nnz) > size(coo_r, 1)) then
             allocate(coo_r_t(nnz_cnt + 10*nnz))
             allocate(coo_c_t(nnz_cnt + 10*nnz))
             allocate(coo_e_t(nnz_cnt + 10*nnz))
             
-            coo_r_t(:nnz_cnt) = coo_r
-            coo_c_t(:nnz_cnt) = coo_c
-            coo_e_t(:nnz_cnt) = coo_e
+            coo_r_t(:nnz_cnt) = coo_r(:nnz_cnt)
+            coo_c_t(:nnz_cnt) = coo_c(:nnz_cnt)
+            coo_e_t(:nnz_cnt) = coo_e(:nnz_cnt)
             
             call move_alloc(coo_r_t, coo_r)
             call move_alloc(coo_c_t, coo_c)
@@ -837,9 +832,9 @@ subroutine get_sparsity_structure_with_triples(csr_s,csr_c,csr_e,sze,N_det_l)
     end do
 
     ! coo_*_all are in shared memory; since threads have disjoint work, this is safe
-    coo_r_all(k+1:k+nnz_arr(ID)) = coo_r
-    coo_c_all(k+1:k+nnz_arr(ID)) = coo_c
-    coo_e_all(k+1:k+nnz_arr(ID)) = coo_e
+    coo_r_all(k+1:k+nnz_arr(ID)) = coo_r(:nnz_cnt)
+    coo_c_all(k+1:k+nnz_arr(ID)) = coo_c(:nnz_cnt)
+    coo_e_all(k+1:k+nnz_arr(ID)) = coo_e(:nnz_cnt)
     !$OMP BARRIER
 
     ! calculate the starting index of each row in COO, since there is no sorting guarantee
@@ -886,8 +881,8 @@ subroutine get_sparsity_structure_with_triples(csr_s,csr_c,csr_e,sze,N_det_l)
     ! loop through rows and construct CSR matrix from COO temp arrays
     !$OMP DO SCHEDULE(GUIDED)
     do i = 1, N_det_l
-        csr_c(csr_s(i):csr_s(i+1)-1) = coo_c_all(coo_s(i):coo_s(i+1)-1)
-        csr_e(csr_s(i):csr_s(i+1)-1) = coo_e_all(coo_s(i):coo_s(i+1)-1)
+        csr_c(csr_s(i):csr_s(i+1)-1) = coo_c_all(coo_s(i):coo_s(i) + (csr_s(i+1) - csr_s(i) - 1))
+        csr_e(csr_s(i):csr_s(i+1)-1) = coo_e_all(coo_s(i):coo_s(i) + (csr_s(i+1) - csr_s(i) - 1))
     end do
     !$OMP END DO
 
@@ -948,29 +943,26 @@ subroutine uH_structure_from_gH(H_p, H_c, H_e, uH_p, uH_c, N_det_g, N_det_u,nnz_
     integer, allocatable :: row_starts(:), pointer_blocks(:)
     integer              :: row_start, row_end, old_row
 
-    buffer_count = 0
-    nts_buffer_count = 0
+    !! profiling
+    double precision :: t0, t1, t_tot, t_all, t_main_loop
 
     ! coo_x stores entries blocked by row; coo_x_nts stores entries in unsorted order
-    !$OMP PARALLEL DEFAULT(PRIVATE) SHARED(N_det_g, N_det_u, nnz_g, nnz_max, N_exc, H_p, H_c, H_e,&
-    !$OMP                                  uH_p, uH_c, pointer_blocks, row_starts, target_N, n_threads,&
-    !$OMP                                  hash_table_size, hash_prime, hash_alpha, hash_beta, hash_vals,&
-    !$OMP                                  I_cut_k, I_det_k, coo_c_all, coo_n_all, u_coo_n_all, nnz_arr, umax_block_size)
-
-    ! hopefully default private works because this is verbose
-    ! OpenMP C API doesn't seem to have private, so when adapting, you will have to do this
-    !! $OMP PRIVATE(ID, buffer_count, nts_buffer_count, max_new_entries,&
-    !! $OMP        coo_r, coo_c, coo_r_nts, coo_c_nts, t_coo_r, t_coo_c,&
-    !! $OMP        row_start, row_end, i_exc, j_exc, row, pidx, col,&
-    !! $OMP        target_row, target_col, cur_exc_degree, target_row_det, target_col_det,&
-    !! $OMP        criterion_a, criterion_b, criterion_c, add_pair,&
-    !! $OMP        i, ii, j , jj)
-                
-    !$ n_threads = OMP_get_num_threads()
+    !$OMP PARALLEL SHARED(N_det_g, N_det_u, nnz_g, nnz_max, N_exc, H_p, H_c, H_e,&
+    !$OMP                 uH_p, uH_c, pointer_blocks, row_starts, target_N, n_threads,&
+    !$OMP                 hash_table_size, hash_prime, hash_alpha, hash_beta, hash_vals,&
+    !$OMP                 I_cut_k, I_det_k, coo_c_all, coo_n_all, u_coo_n_all, nnz_arr, umax_block_size, t_all)&
+    !$OMP PRIVATE(i, ii, j, jj, k, kk, i_exc, j_exc, row, pidx, col, target_row, target_col, cur_exc_degree,&
+    !$OMP         ID, scn_a, target_row_det, target_col_det, criterion_a, criterion_b, criterion_c, add_pair,&
+    !$OMP         buffer_count, nts_buffer_count, max_new_entries, buffer_total, ubuffer_total,&
+    !$OMP         block_start, block_end, nts_block_start, nts_block_end, block_total, max_block_size,&
+    !$OMP         coo_r, coo_c, coo_n, coo_r_nts, coo_c_nts, coo_n_nts, u_coo_r, u_coo_c, u_coo_n, u_block_rows,&
+    !$OMP         t_coo_r, t_coo_c, sort_idx, row_start, row_end, old_row, t0, t1, t_tot, t_main_loop)
+    
     !$ ID = OMP_get_thread_num() + 1
-
+    
     !! calculate row partitions
     !$OMP SINGLE
+    !$ n_threads = OMP_get_num_threads()
     allocate(pointer_blocks(N_det_g+1), row_starts(n_threads+1), coo_n_all(N_det_u+1))
     allocate(nnz_arr(N_det_u, n_threads+1))
     nnz_arr = 0
@@ -979,8 +971,11 @@ subroutine uH_structure_from_gH(H_p, H_c, H_e, uH_p, uH_c, N_det_g, N_det_u,nnz_
     pointer_blocks = 0
     row_starts = 0
     target_N = nnz_g / n_threads
+    t_all = 0.0
     !$OMP END SINGLE
     !$OMP BARRIER
+
+    t_tot = 0.0
 
     ! split the work so that different groups of contiguous rows have roughly equal entries
     !$OMP DO SCHEDULE(GUIDED)
@@ -1012,7 +1007,6 @@ subroutine uH_structure_from_gH(H_p, H_c, H_e, uH_p, uH_c, N_det_g, N_det_u,nnz_
     row_end = row_starts(ID+1) - 1
     if (ID == n_threads) row_end = N_det_g
     
-                  
     allocate(coo_r(8192), coo_c(8192), coo_n(N_det_u+1), coo_r_nts(8192), coo_c_nts(8192), coo_n_nts(N_det_u+1)) ! private
     buffer_count = 0
     nts_buffer_count = 0
@@ -1021,6 +1015,8 @@ subroutine uH_structure_from_gH(H_p, H_c, H_e, uH_p, uH_c, N_det_g, N_det_u,nnz_
 
     !! this loop accomplishes the equivalent task as the loop over determinants in get_sparsity_structure()
     !! loop over excitation pairs
+
+    call wall_time(t0)
     do i_exc = 1, N_exc
         do j_exc = 1, N_exc
 
@@ -1038,18 +1034,18 @@ subroutine uH_structure_from_gH(H_p, H_c, H_e, uH_p, uH_c, N_det_g, N_det_u,nnz_
                 if (max_new_entries > (size(coo_r,1) - buffer_count - 100)) then ! reallocate sorted buffer
                     allocate(t_coo_r(buffer_count + 4 *max_new_entries), t_coo_c(buffer_count + 4*max_new_entries))
 
-                    t_coo_r(:buffer_count) = coo_r
-                    t_coo_c(:buffer_count) = coo_c
+                    t_coo_r(:buffer_count) = coo_r(:buffer_count)
+                    t_coo_c(:buffer_count) = coo_c(:buffer_count)
 
                     call move_alloc(t_coo_r, coo_r)
                     call move_alloc(t_coo_c, coo_c)
                 end if
                 
-                if (max_new_entries > (size(coo_r_nts,1) - buffer_count - 100)) then ! reallocate unsorted buffer
-                    allocate(t_coo_r(buffer_count + 4 *max_new_entries), t_coo_c(buffer_count + 4*max_new_entries))
+                if (max_new_entries > (size(coo_r_nts,1) - nts_buffer_count - 100)) then ! reallocate unsorted buffer
+                    allocate(t_coo_r(nts_buffer_count + 4 *max_new_entries), t_coo_c(nts_buffer_count + 4*max_new_entries))
     
-                    t_coo_r(:buffer_count) = coo_r_nts
-                    t_coo_c(:buffer_count) = coo_c_nts
+                    t_coo_r(:nts_buffer_count) = coo_r_nts(:nts_buffer_count)
+                    t_coo_c(:nts_buffer_count) = coo_c_nts(:nts_buffer_count)
     
                     call move_alloc(t_coo_r, coo_r_nts)
                     call move_alloc(t_coo_c, coo_c_nts)
@@ -1059,10 +1055,6 @@ subroutine uH_structure_from_gH(H_p, H_c, H_e, uH_p, uH_c, N_det_g, N_det_u,nnz_
                 target_row = hash_value(hash_alpha, hash_beta, hash_vals, hash_prime, hash_table_size, N_exc,&
                                         target_row_det(:,1), target_row_det(:,2))
 
-                ! if (target_row == -1) then
-                !     print *,  "diag_ii", ID, i_exc, j_exc, row
-                ! end if
-                
                 !! handle diagonal excitations out of loop
                 if (i_exc == j_exc) then
                     buffer_count += 1
@@ -1073,10 +1065,6 @@ subroutine uH_structure_from_gH(H_p, H_c, H_e, uH_p, uH_c, N_det_g, N_det_u,nnz_
                     target_col_det = I_det_k(:, :, row, j_exc)
                     target_col = hash_value(hash_alpha, hash_beta, hash_vals, hash_prime, hash_table_size, N_exc,&
                                             target_col_det(:,1), target_col_det(:,2))
-
-                    if (target_col == -1) then
-                        print *, "diag_ij", ID, i_exc, j_exc, row, target_row
-                    end if
                     
                     if (target_col < target_row) then
                         nts_buffer_count += 1
@@ -1182,13 +1170,17 @@ subroutine uH_structure_from_gH(H_p, H_c, H_e, uH_p, uH_c, N_det_g, N_det_u,nnz_
 
         end do
     end do
-
+    call wall_time(t1)
+    t_main_loop = t1-t0
     !! sort buffers per task; reduce combined buffers to unique buffers, blocked by per row
 
     ! standard buffer is blocked by row but blocks aren't sorted
     ! NTS is blocked by col, rows aren't sorted
+    call wall_time(t0)
     call double_sort(coo_r, coo_c, buffer_count, coo_n, N_det_u)
     call double_sort(coo_r_nts, coo_c_nts, nts_buffer_count, coo_n_nts, N_det_u)
+    call wall_time(t1)
+    t_tot += t1-t0
 
     ! combine buffers by row block
     buffer_total = nts_buffer_count + buffer_count
@@ -1225,12 +1217,15 @@ subroutine uH_structure_from_gH(H_p, H_c, H_e, uH_p, uH_c, N_det_g, N_det_u,nnz_
                 sort_idx(j) = j
             end do
 
+            call wall_time(t0)
             call insertion_isort(t_coo_c, sort_idx, block_total)
+            call wall_time(t1)
             call unique_from_sorted_buffer(t_coo_c, block_total, ubuffer_total)
+            t_tot += t1-t0
 
             ! add into compact unique buffers
             u_coo_n(i+1) = u_coo_n(i) + ubuffer_total
-            u_coo_c(u_coo_n(i):u_coo_n(i+1)-1) = t_coo_c
+            u_coo_c(u_coo_n(i):u_coo_n(i+1)-1) = t_coo_c(:ubuffer_total)
 
             nnz_arr(i, ID+1) = ubuffer_total
         else
@@ -1282,7 +1277,8 @@ subroutine uH_structure_from_gH(H_p, H_c, H_e, uH_p, uH_c, N_det_g, N_det_u,nnz_
     end do
     !$OMP END SINGLE
     !$OMP BARRIER
-    !TODO: better checking of the coo_n blocks, something might not be set correctly, but only seems 
+
+    ! TODO: better checking of the coo_n blocks, something might not be set correctly, but only seems 
     ! to affect the end block
 
     do i = 1, N_det_u
@@ -1342,8 +1338,11 @@ subroutine uH_structure_from_gH(H_p, H_c, H_e, uH_p, uH_c, N_det_g, N_det_u,nnz_
 
         block_start = coo_n_all(i)
         block_end = coo_n_all(i+1) - 1
-        if ((block_end - block_start + 1) > 0) then
+        if ((block_end - block_start + 1) > 0) then ! this shouldn't be needed
+            call wall_time(t0)
             call insertion_isort(coo_c_all(block_start:block_end), sort_idx, block_end-block_start+1)
+            call wall_time(t1)
+            t_tot += t1-t0
             call unique_from_sorted_buffer(coo_c_all(block_start:block_end), block_end-block_start+1, ubuffer_total)
             u_coo_n_all(i) = ubuffer_total
         else
@@ -1387,11 +1386,31 @@ subroutine uH_structure_from_gH(H_p, H_c, H_e, uH_p, uH_c, N_det_g, N_det_u,nnz_
 
     !! remaining clean up
     !$OMP SINGLE
-    deallocate(pointer_blocks, row_starts, coo_n_all, coo_c_all, u_coo_n_all, nnz_arr)
+    ! deallocate(pointer_blocks, row_starts, coo_n_all, coo_c_all, u_coo_n_all, nnz_arr)
+    deallocate(pointer_blocks, row_starts, coo_n_all, nnz_arr)
     !$OMP END SINGLE
 
     deallocate(coo_r, coo_c, coo_n, coo_r_nts, coo_c_nts, coo_n_nts, u_coo_c, u_coo_n, u_block_rows)
+    !$OMP BARRIER
 
+    !$OMP CRITICAL
+    t_all += t_tot
+    ! print *, ID, t_tot
+    !$OMP END CRITICAL
+    !$OMP BARRIER
+    !$OMP SINGLE
+    print *, "Average time per thread spent sorting: ", t_all/n_threads
+    t_all = 0
+    !$OMP END SINGLE
+    !$OMP BARRIER
+    !$OMP CRITICAL
+    t_all += t_main_loop
+    ! print *, ID, t_main_loop
+    !$OMP END CRITICAL
+    !$OMP BARRIER
+    !$OMP SINGLE
+    print *, "Average time per thread spent in main loop: ", t_all/n_threads
+    !$OMP END SINGLE
     !$OMP END PARALLEL
 end
 
@@ -1527,7 +1546,7 @@ subroutine get_all_sparse_columns(k_a, columns, row, nnz, nnz_max, N_det_l)
     ! start from (0,1) to excite to (1,1)
     do j = 1, n_det_beta_unique
 
-        kcol = psi_bilinear_matrix_columns(k)
+        ! kcol = psi_bilinear_matrix_columns(k)
 
         tmp_det2(:,2) = psi_det_beta_unique (:, j)
 
@@ -1743,7 +1762,7 @@ subroutine get_all_sparse_columns_with_triples(k_a, columns, exc_degree, row, nn
     ! start from (0,1) to excite to (1,1)
     do j = 1, n_det_beta_unique
 
-        kcol = psi_bilinear_matrix_columns(k)
+        ! kcol = psi_bilinear_matrix_columns(j)
 
         tmp_det2(:,2) = psi_det_beta_unique (:, j)
 
@@ -1800,7 +1819,7 @@ subroutine get_all_sparse_columns_with_triples(k_a, columns, exc_degree, row, nn
 
     do j = 1, n_det_beta_unique
 
-        kcol = psi_bilinear_matrix_columns(k)
+        ! kcol = psi_bilinear_matrix_columns(k)
 
         tmp_det2(:,2) = psi_det_beta_unique (:, j)
 
@@ -1930,17 +1949,12 @@ subroutine calc_sparse_dH(H_p, H_c, H_v, sze, nnz, dets)
     double precision, intent(out) :: H_v(nnz)
     double precision :: hij
 
-    H_v = 0.d0
-
-    call i_H_j(dets(:,:,1), dets(:,:,1), N_int, hij) 
-
     !$OMP PARALLEL PRIVATE(i, j, hij) SHARED(H_c, H_p, H_v, sze, dets)
     !$OMP DO SCHEDULE(GUIDED)
     do i = 1, sze                
         ! loop over columns
         do j = H_p(i), H_p(i+1)-1
-            call i_H_j(dets(:,:,i),&
-                       dets(:,:,H_c(j)), N_int, hij)
+            call i_H_j(dets(:,:,i), dets(:,:,H_c(j)), N_int, hij)
             H_v(j) = hij
         end do
     end do

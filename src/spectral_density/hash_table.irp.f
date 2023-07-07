@@ -38,7 +38,8 @@ integer function hash_value( hash_alpha, hash_beta, hash_vals, hash_prime, ht_si
     ! Hash function for table of excited determinants
     END_DOC
     
-    integer, intent(in) :: det_alpha, det_beta, hash_prime, ht_size, n_orbs
+    integer, intent(in) :: hash_prime, ht_size, n_orbs
+    integer(bit_kind), intent(in) :: det_alpha(N_int), det_beta(N_int)
     integer, intent(inout) :: hash_vals(ht_size)
     integer(bit_kind), intent(inout) :: hash_alpha(N_int, ht_size), hash_beta(N_int, ht_size)
     integer :: idx, hash_index
