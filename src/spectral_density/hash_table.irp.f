@@ -26,7 +26,7 @@ integer function hash_index(det_alpha, det_beta, hash_prime, ht_size, n_orbs)
     integer(bit_kind), intent(in) :: det_alpha(N_int), det_beta(N_int)
     
     !! need to adapt modulo to work with integers represented as multiple ints,  ie., bit_kind > 1
-    hash_index = modulo(det_alpha(1), hash_prime) + (det_beta(1) / (ht_size / n_orbs))
+    hash_index = modulo(det_alpha(1), hash_prime) + modulo(det_beta(1), ht_size)*(det_beta(1) / hash_prime)
     hash_index = modulo(hash_index, ht_size)
     return
 
@@ -99,7 +99,7 @@ subroutine insert_key_val_pair(hash_alpha, hash_beta, hash_vals, hash_prime, ht_
     success = .true.
 end
 
-subroutine build_hash_table(hash_alpha, hash_beta, hash_vals, hash_prime, ht_size, I_cut, I_det, n_orb, n_det_l, det_basis, n_det_out)
+subroutine build_hash_table(hash_alpha, hash_beta, hash_vals, hash_prime, ht_size, I_cut, I_det, I_det_ind, n_orb, n_det_l, det_basis, n_det_out)
     implicit none
     BEGIN_DOC
     ! Construct the hash table
@@ -108,17 +108,18 @@ subroutine build_hash_table(hash_alpha, hash_beta, hash_vals, hash_prime, ht_siz
     integer, intent(in)     :: ht_size, hash_prime, n_orb, n_det_l, I_cut(n_det_l, n_orb)
     integer(bit_kind), intent(in) :: I_det(N_int, 2, n_det_l, n_orb)
     integer, intent(inout)  :: n_det_out
-    integer, intent(out)    :: hash_vals(ht_size)
+    integer, intent(out)    :: hash_vals(ht_size), I_det_ind(n_det_l, n_orb)
     integer(bit_kind), intent(out) :: hash_alpha(N_int, ht_size), hash_beta(N_int, ht_size)
     integer(bit_kind), intent(out) :: det_basis(N_int, 2, ht_size)
     logical                 :: hash_success
 
-    integer :: i, iorb, hash_value, test_val
+    integer :: i, iorb, hash_value, hashed_ind
 
     n_det_out = 1
-
+    I_det_ind = -1
     ! iterate over each set of determinants in excitation order
     do iorb = 1, n_orb
+        print *, "Inserting determinants from orb: ", iorb
         do i = 1, n_det_l
             if (I_cut(i, iorb) == 1) then
 
@@ -127,7 +128,12 @@ subroutine build_hash_table(hash_alpha, hash_beta, hash_vals, hash_prime, ht_siz
 
                 if (hash_success) then
                     det_basis(:, :, n_det_out) = I_det(:,:,i,iorb)
+                    I_det_ind(i, iorb) = n_det_out
                     n_det_out += 1
+                else
+                    hashed_ind = hash_value(hash_alpha, hash_beta, hash_vals, hash_prime, ht_size, n_orb,&
+                                            I_det(:,1,i,iorb), I_det(:,2,i,iorb))
+                    I_det_ind(i, iorb) = hashed_ind
                 end if
 
             end if

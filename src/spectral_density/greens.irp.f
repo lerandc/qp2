@@ -247,7 +247,7 @@ BEGIN_PROVIDER [complex*16, greens_R, (greens_omega_N, n_iorb_R, ns_dets)]
     logical                 :: orbital_coupling, hash_success
     integer                 :: hash_table_size, n_coupled_dets, hash_prime, nnz_max_u, ref_count, ref_degree_a, ref_degree_b, test_degree_a, test_degree_b, j, k
     integer, allocatable    :: I_cut_k(:,:), hash_vals(:), H_e_all(:), t_H_e(:)
-    integer, allocatable    :: uH_p(:), uH_c(:), t_uH_c(:)
+    integer, allocatable    :: uH_p(:), uH_c(:), t_uH_c(:), I_det_ind(:,:)
     double precision, allocatable ::  uH_v(:)
     integer(bit_kind), allocatable :: I_det_k(:,:,:,:), hash_alpha(:,:), hash_beta(:,:), det_basis(:,:,:), t_det_basis(:,:,:)
     double precision, allocatable  :: psi_coef_intrinsic_excited(:,:,:), psi_coef_coupled_excited(:,:)
@@ -293,9 +293,7 @@ BEGIN_PROVIDER [complex*16, greens_R, (greens_omega_N, n_iorb_R, ns_dets)]
     
     ! greens_R = (0.d0, 0.d0)
 
-    orbital_coupling = .true.
-
-    if (orbital_coupling == .true.) then
+    if (spectral_density_orbital_coupling == .true.) then
 
         call set_ref_bitmask(1, .true.)
         ! work on just the terminal number of determinants for now
@@ -324,10 +322,14 @@ BEGIN_PROVIDER [complex*16, greens_R, (greens_omega_N, n_iorb_R, ns_dets)]
                                 
                                 
         !! construct the hash table
-        hash_table_size = 8192 !N_det_l * n_iorb_R
+        ! eventually, need a better heuristic for the hash table size to balance size in memory
+        ! at larger intrinsic space sizes, this works better since there are more generated determinants 
+        ! falling into intersecting spaces
+        hash_table_size =N_det_l * n_iorb_R * 8
         hash_prime = 8191
 
         allocate(hash_vals(hash_table_size), hash_alpha(N_int, hash_table_size), hash_beta(N_int, hash_table_size), stat=mem_err)
+        allocate(I_det_ind(N_det_l, n_iorb_r))
         allocate(det_basis(N_int, 2, hash_table_size), stat=mem_err)
 
         hash_alpha = 0
@@ -336,7 +338,7 @@ BEGIN_PROVIDER [complex*16, greens_R, (greens_omega_N, n_iorb_R, ns_dets)]
         det_basis = 0
 
         call build_hash_table(hash_alpha, hash_beta, hash_vals, hash_prime, hash_table_size,&
-                              I_cut_k, I_det_k, n_iorb_R, N_det_l, det_basis, n_coupled_dets)
+                              I_cut_k, I_det_k, I_det_ind, n_iorb_R, N_det_l, det_basis, n_coupled_dets)
     
         allocate(t_det_basis(N_int, 2, n_coupled_dets), stat=mem_err)
         t_det_basis(:,:,:n_coupled_dets) = det_basis(:,:,:n_coupled_dets)
@@ -376,7 +378,7 @@ BEGIN_PROVIDER [complex*16, greens_R, (greens_omega_N, n_iorb_R, ns_dets)]
         call uH_structure_from_gH(H_p_all, H_c_all, H_e_all, uH_p, uH_c,&
                             N_det_l, n_coupled_dets, nnz, nnz_max_u, n_iorb_R,&
                             hash_alpha, hash_beta, hash_vals, hash_prime, hash_table_size,&
-                            I_cut_k, I_det_k)
+                            I_cut_k, I_det_k, I_det_ind)
 
         nnz_max_u = uH_p(n_coupled_dets+1)-1
         allocate(t_uH_c(nnz_max_u), uH_v(nnz_max_u), stat=mem_err)
@@ -441,7 +443,7 @@ BEGIN_PROVIDER [complex*16, greens_R, (greens_omega_N, n_iorb_R, ns_dets)]
         ! clean up
         deallocate(H_p_all, H_c_all, H_e_all, uH_p, uH_c, uH_v)
         deallocate(hash_vals, hash_alpha, hash_beta)
-        deallocate(det_basis, I_cut_k, I_det_k, psi_coef_intrinsic_excited, psi_coef_coupled_excited)
+        deallocate(det_basis, I_cut_k, I_det_k, I_det_ind, psi_coef_intrinsic_excited, psi_coef_coupled_excited)
     else
         ! loop over number of determinants 
         do i_n_det = 1, ns_dets
