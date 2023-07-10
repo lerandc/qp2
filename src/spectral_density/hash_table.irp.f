@@ -26,7 +26,7 @@ integer function hash_index(det_alpha, det_beta, hash_prime, ht_size, n_orbs)
     integer(bit_kind), intent(in) :: det_alpha(N_int), det_beta(N_int)
     
     !! need to adapt modulo to work with integers represented as multiple ints,  ie., bit_kind > 1
-    hash_index = modulo(det_alpha(1), hash_prime) + modulo(det_beta(1), ht_size)*(det_beta(1) / hash_prime)
+    hash_index = modulo(det_alpha(1), hash_prime) + modulo(det_beta(1), ht_size/(hash_prime + 1))*(hash_prime + 1)
     hash_index = modulo(hash_index, ht_size)
     return
 
@@ -64,7 +64,7 @@ integer function hash_value( hash_alpha, hash_beta, hash_vals, hash_prime, ht_si
     
 end function hash_value
 
-subroutine insert_key_val_pair(hash_alpha, hash_beta, hash_vals, hash_prime, ht_size, n_orbs, det_alpha, det_beta, target_row, success)
+subroutine insert_key_val_pair(hash_alpha, hash_beta, hash_vals, hash_prime, ht_size, n_orbs, det_alpha, det_beta, idx, target_row, success)
     implicit none
     BEGIN_DOC
     ! Hash function for table of excited determinants
@@ -72,10 +72,11 @@ subroutine insert_key_val_pair(hash_alpha, hash_beta, hash_vals, hash_prime, ht_
     
     integer, intent(in)    :: ht_size, target_row, hash_prime, n_orbs
     logical, intent(out)   :: success
+    integer, intent(out)   :: idx
     integer, intent(inout) :: hash_vals(ht_size)
     integer(bit_kind), intent(in) :: det_alpha(N_int), det_beta(N_int)
     integer(bit_kind), intent(inout) :: hash_alpha(N_int, ht_size), hash_beta(N_int, ht_size)
-    integer :: idx, hash_index
+    integer :: hash_index
     logical :: det_equal
     
     idx = hash_index(det_alpha, det_beta, hash_prime, ht_size, n_orbs)
@@ -92,9 +93,9 @@ subroutine insert_key_val_pair(hash_alpha, hash_beta, hash_vals, hash_prime, ht_
         idx = modulo(idx, ht_size)
     end do
 
-    hash_alpha(:, idx) = det_alpha
-    hash_beta(:, idx) = det_beta
-    hash_vals(idx) = target_row
+    ! hash_alpha(:, idx) = det_alpha
+    ! hash_beta(:, idx) = det_beta
+    ! hash_vals(idx) = target_row
 
     success = .true.
 end
@@ -113,32 +114,47 @@ subroutine build_hash_table(hash_alpha, hash_beta, hash_vals, hash_prime, ht_siz
     integer(bit_kind), intent(out) :: det_basis(N_int, 2, ht_size)
     logical                 :: hash_success
 
-    integer :: i, iorb, hash_value, hashed_ind
+    integer :: i, iorb, hash_value, cur_idx, cached_idx
 
     n_det_out = 1
     I_det_ind = -1
     ! iterate over each set of determinants in excitation order
+    ! $OMP PARALLEL SHARED(hash_alpha, hash_beta, hash_vals, hash_prime, ht_size, I_cut, I_det, I_det_ind, n_orb, n_det_l, det_basis, n_det_out) PRIVATE(iorb, i, cur_idx, cached_idx)
     do iorb = 1, n_orb
         print *, "Inserting determinants from orb: ", iorb
+
+        ! within an excitation, should have no hash table collisions
+        ! $OMP DO SCHEDULE(GUIDED)
         do i = 1, n_det_l
             if (I_cut(i, iorb) == 1) then
 
                 call insert_key_val_pair(hash_alpha, hash_beta, hash_vals, hash_prime, ht_size, n_orb, &
-                                         I_det(:,1,i,iorb), I_det(:,2,i,iorb), n_det_out, hash_success)
+                                         I_det(:,1,i,iorb), I_det(:,2,i,iorb), cur_idx, n_det_out, hash_success)
 
                 if (hash_success) then
+                    ! $OMP CRITICAL
                     det_basis(:, :, n_det_out) = I_det(:,:,i,iorb)
                     I_det_ind(i, iorb) = n_det_out
+                    
+                    hash_alpha(:, cur_idx) = I_det(:,1,i,iorb)
+                    hash_beta(:, cur_idx) = I_det(:,2,i,iorb)
+                    hash_vals(cur_idx) = n_det_out
+                    
                     n_det_out += 1
+                    ! $OMP END CRITICAL
                 else
-                    hashed_ind = hash_value(hash_alpha, hash_beta, hash_vals, hash_prime, ht_size, n_orb,&
+                    cached_idx = hash_value(hash_alpha, hash_beta, hash_vals, hash_prime, ht_size, n_orb,&
                                             I_det(:,1,i,iorb), I_det(:,2,i,iorb))
-                    I_det_ind(i, iorb) = hashed_ind
+                    I_det_ind(i, iorb) = cached_idx
+
+                    if (cached_idx < 0) print *, iorb, i
                 end if
 
             end if
         end do
+        ! $OMP END DO
     end do
+    ! $OMP END PARALLEL
 
     n_det_out = n_det_out - 1 ! correct after last insertion
 

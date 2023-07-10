@@ -81,6 +81,65 @@ subroutine sparse_csr_dmv(A_v, A_c, A_p, x, y, sze, nnz)
     !$OMP END PARALLEL
 end
 
+subroutine sparse_csr_dmv_row_part(A_v, A_c, A_p, x, y, sze, nnz, row_starts, n_threads)
+    implicit none
+    BEGIN_DOC
+    ! Compute the matrix vector product y = Ax with sparse A in CSR format
+    ! Not general. Assumes A is sze x sze and symmetric; x, y are sze
+    !
+    ! A_v is matrix values
+    ! A_c is matrix column indices
+    ! A_p are the row pointers
+    ! x is an input vector of length sze
+    ! y is an output vector of length sze
+    ! nnz is the total number of nonzero entries in A
+    END_DOC
+
+    integer,          intent(in)  :: sze, nnz, n_threads, A_c(nnz), A_p(sze+1), row_starts(n_threads)
+    double precision, intent(in)  :: A_v(nnz), x(sze)
+    double precision, intent(out) :: y(sze)
+    double precision, allocatable :: y_t(:)
+    integer                       :: i, j, ID
+    integer :: OMP_get_thread_num
+
+
+    !$OMP PARALLEL PRIVATE(i, j, y_t, ID) SHARED(y, x, A_c, A_p, A_v, sze, row_starts)
+    allocate(y_t(sze))
+    y_t = 0.d0
+    !$ ID = OMP_get_thread_num() + 1
+
+    ! loop over rows
+    do i = row_starts(ID), row_starts(ID+1) - 1
+        
+        
+        ! make sure row actually is in reduced determinant space
+        if (A_p(i+1) - A_p(i) > 0) then
+            ! calculate diagonal separately to avoid double counting
+            ! first entry per column is guaranteed to be diagonal since all diagonal
+            ! elements of H are nonzero
+            j = A_p(i)
+            y_t(i) = y_t(i) + A_v(j) * x(A_c(j))
+        end if
+        
+        ! loop over columns
+        do j = A_p(i)+1, A_p(i+1)-1
+            ! calculate element of owned row
+            y_t(i) = y_t(i) + A_v(j) * x(A_c(j))
+
+            ! calculate element of owned column
+            y_t(A_c(j)) = y_t(A_c(j)) + A_v(j) * x(i)
+        end do
+    end do
+
+    ! perform reduction of final answer
+    !$OMP CRITICAL
+    y = y + y_t
+    !$OMP END CRITICAL
+
+    deallocate(y_t)
+    !$OMP END PARALLEL
+end
+
 subroutine sparse_csr_zmv(A_v, A_c, A_p, x, y, sze, nnz)
     implicit none
     BEGIN_DOC
@@ -929,9 +988,10 @@ subroutine uH_structure_from_gH(H_p, H_c, H_e, uH_p, uH_c, N_det_g, N_det_u,nnz_
     !! routine variables
     integer             :: i, ii, j, jj, k, kk
     integer             :: i_exc, j_exc, row, pidx, col, target_row, target_col, cur_exc_degree
+    integer*1           :: bit_degree, criterion_a_mask, criterion_b_mask, criterion_c_mask, bit_map(8)
     integer             :: target_N, n_threads, ID, scn_a
     integer(bit_kind)   :: target_row_det(N_int, 2), target_col_det(N_int, 2)
-    logical             :: criterion_a, criterion_b, criterion_c, add_pair
+    logical             :: block_a, block_b, criterion_a, criterion_b, criterion_c, pass_a, pass_b, pass_c, add_pair
 
     integer              :: buffer_count, nts_buffer_count, max_new_entries, buffer_total, ubuffer_total, umax_block_size
     integer              :: block_start, block_end, nts_block_start, nts_block_end, block_total, max_block_size
@@ -946,18 +1006,25 @@ subroutine uH_structure_from_gH(H_p, H_c, H_e, uH_p, uH_c, N_det_g, N_det_u,nnz_
     !! profiling
     double precision :: t0, t1, t_tot, t_all, t_main_loop
 
+    criterion_a_mask = 144
+    criterion_b_mask = 231
+    criterion_c_mask = 220
+    bit_map = (/128, 64, 32, 16, 8, 4, 2, 1/)
+
     ! coo_x stores entries blocked by row; coo_x_nts stores entries in unsorted order
     !$OMP PARALLEL SHARED(N_det_g, N_det_u, nnz_g, nnz_max, N_exc, H_p, H_c, H_e,&
     !$OMP                 uH_p, uH_c, pointer_blocks, row_starts, target_N, n_threads,&
     !$OMP                 hash_table_size, hash_prime, hash_alpha, hash_beta, hash_vals,&
     !$OMP                 I_cut_k, I_det_k, I_det_ind,&
-    !$OMP                 coo_c_all, coo_n_all, u_coo_n_all, nnz_arr, umax_block_size, t_all)&
+    !$OMP                 coo_c_all, coo_n_all, u_coo_n_all, nnz_arr, umax_block_size, t_all,&
+    !$OMP                 criterion_a_mask, criterion_b_mask, criterion_c_mask, bit_map)&
     !$OMP PRIVATE(i, ii, j, jj, k, kk, i_exc, j_exc, row, pidx, col, target_row, target_col, cur_exc_degree,&
-    !$OMP         ID, scn_a, target_row_det, target_col_det, criterion_a, criterion_b, criterion_c, add_pair,&
+    !$OMP         ID, scn_a, target_row_det, target_col_det, block_a, block_b, criterion_a, criterion_b, criterion_c, add_pair,&
     !$OMP         buffer_count, nts_buffer_count, max_new_entries, buffer_total, ubuffer_total,&
     !$OMP         block_start, block_end, nts_block_start, nts_block_end, block_total, max_block_size,&
     !$OMP         coo_r, coo_c, coo_n, coo_r_nts, coo_c_nts, coo_n_nts, u_coo_r, u_coo_c, u_coo_n, u_block_rows,&
-    !$OMP         t_coo_r, t_coo_c, sort_idx, row_start, row_end, old_row, t0, t1, t_tot, t_main_loop)
+    !$OMP         t_coo_r, t_coo_c, sort_idx, row_start, row_end, old_row, t0, t1, t_tot, t_main_loop,&
+    !$OMP         bit_degree, pass_a, pass_b, pass_c)
     
     !$ ID = OMP_get_thread_num() + 1
     
@@ -1115,6 +1182,7 @@ subroutine uH_structure_from_gH(H_p, H_c, H_e, uH_p, uH_c, N_det_g, N_det_u,nnz_
                         ! end if
                         
                         cur_exc_degree = H_e(pidx)
+                        bit_degree = bit_map(H_e(pidx))
 
                         if (i_exc == j_exc) then
                             ! add in edges from intrinsic space
@@ -1135,36 +1203,62 @@ subroutine uH_structure_from_gH(H_p, H_c, H_e, uH_p, uH_c, N_det_g, N_det_u,nnz_
                             !! following schema for determining how many determinants to add relies on fact that
                             !! applied excitations are within the same spin channel
 
-                            ! both excitations are accepted in both determinants, and alpha degree increases by 1
-                            criterion_a = (I_cut_k(row, i_exc) == I_cut_k(col, i_exc)) .and. (I_cut_k(row, j_exc) == I_cut_k(col, j_exc))
+                            ! ! both excitations are accepted in both source determinants, and alpha degree increases by 1
+                            ! ! i, j are common alpha-occupied shells
+                            ! criterion_a = (I_cut_k(row, i_exc) == I_cut_k(col, i_exc)) .and. (I_cut_k(row, j_exc) == I_cut_k(col, j_exc))
 
-                            ! determinants accept exclusive excitations, and alpha degree reduces by 1
-                            criterion_b = (I_cut_k(row, i_exc) /= I_cut_k(col, i_exc)) .and. (I_cut_k(row, j_exc) /= I_cut_k(col, j_exc))
+                            ! ! source determinants accept exclusive excitations, and alpha degree reduces by 1
+                            ! ! i, j are exclusive alpha-occupied shells 
+                            ! criterion_b = (I_cut_k(row, i_exc) /= I_cut_k(col, i_exc)) .and. (I_cut_k(row, j_exc) /= I_cut_k(col, j_exc))
 
-                            ! one determinant can accept both excitations, while other can accept only one; overall degree stays same
-                            criterion_c = ( (I_cut_k(row, i_exc) /= I_cut_k(col, i_exc)) /= (I_cut_k(row, j_exc) /= I_cut_k(col, j_exc)) )&
-                                    .and. ( (I_cut_k(row, i_exc) == I_cut_k(col, i_exc)) /= (I_cut_k(row, j_exc) == I_cut_k(col, j_exc)) )
+                            
+                            ! ! one source determinant can accept both excitations, while other can accept only one; overall degree stays same
+                            ! ! i/j are common alpha-occupied alpha; j/i are exclusive alpha-occupied
+                            ! criterion_c = ( (I_cut_k(row, i_exc) /= I_cut_k(col, i_exc)) /= (I_cut_k(row, j_exc) /= I_cut_k(col, j_exc)) )&
+                            !         .and. ( (I_cut_k(row, i_exc) == I_cut_k(col, i_exc)) /= (I_cut_k(row, j_exc) == I_cut_k(col, j_exc)) )
+                                    
+                                    
+                            block_a = I_cut_k(row, i_exc) == I_cut_k(col, i_exc)
+                            block_b = I_cut_k(row, j_exc) == I_cut_k(col, j_exc)
+                            
+                            ! both excitations are accepted in both source determinants, and alpha degree increases by 1
+                            ! i, j are common alpha-occupied shells
+                            criterion_a = block_a .and. block_b
 
-                            add_pair = .false.
-                            select case (cur_exc_degree)
-                                case (1) ! (1,0) -> (1,0), (2,0)
-                                    !add_pair = criterion_c .or. ~criterion_c ! if c then (1,0), else (2,0)
-                                    add_pair = .true. 
-                                case (2) ! (2,0) -> (1,0), (2,0)
-                                    add_pair = criterion_b .or. criterion_c 
-                                case (3) ! (3,0) -> (2,0)
-                                    add_pair = criterion_b
-                                case (4) ! (0,1) -> (0,1), (1,1) 
-                                    add_pair = criterion_a .or. criterion_c
-                                case (5) ! (0,2) -> (0,2)
-                                    add_pair = criterion_c
-                                case (6) ! (1,1) -> (0,1), (1,1)
-                                    add_pair = criterion_b .or. criterion_c
-                                case (7) ! (1,2) -> (0,2)
-                                    add_pair = criterion_b
-                                case (8) ! (2,1) -> (1,1)
-                                    add_pair = criterion_b
-                            end select
+
+                            ! source determinants accept exclusive excitations, and alpha degree reduces by 1
+                            ! i, j are exclusive alpha-occupied shells 
+                            criterion_b = (.not. block_a) .and. (.not. block_b)
+
+                            
+                            ! one source determinant can accept both excitations, while other can accept only one; overall degree stays same
+                            ! i/j are common alpha-occupied alpha; j/i are exclusive alpha-occupied
+                            criterion_c = block_a /= block_b
+
+                            pass_a = iand(bit_degree, criterion_a*criterion_a_mask)
+                            pass_b = iand(bit_degree, criterion_b*criterion_b_mask)
+                            pass_c = iand(bit_degree, criterion_c*criterion_c_mask)
+                            add_pair = ior(ior(pass_a, pass_b), pass_c)
+                            ! add_pair = .false.
+                            ! select case (cur_exc_degree)
+                            !     case (1) ! (1,0) -> (1,0), (2,0)
+                            !         !add_pair = criterion_c .or. ~criterion_c ! if c then (1,0), else (2,0)
+                            !         add_pair = .true. 
+                            !     case (2) ! (2,0) -> (1,0), (2,0)
+                            !         add_pair = criterion_b .or. criterion_c 
+                            !     case (3) ! (3,0) -> (2,0)
+                            !         add_pair = criterion_b
+                            !     case (4) ! (0,1) -> (0,1), (1,1) 
+                            !         add_pair = criterion_a .or. criterion_c
+                            !     case (5) ! (0,2) -> (0,2)
+                            !         add_pair = criterion_c
+                            !     case (6) ! (1,1) -> (0,1), (1,1)
+                            !         add_pair = criterion_b .or. criterion_c
+                            !     case (7) ! (1,2) -> (0,2)
+                            !         add_pair = criterion_b
+                            !     case (8) ! (2,1) -> (1,1)
+                            !         add_pair = criterion_b
+                            ! end select
 
                             if ( add_pair ) then
                                 if (target_col < target_row) then
@@ -1236,7 +1330,7 @@ subroutine uH_structure_from_gH(H_p, H_c, H_e, uH_p, uH_c, N_det_g, N_det_u,nnz_
             end do
 
             call wall_time(t0)
-            call insertion_isort(t_coo_c, sort_idx, block_total)
+            call quick_isort(t_coo_c, sort_idx, block_total)
             call wall_time(t1)
             call unique_from_sorted_buffer(t_coo_c, block_total, ubuffer_total)
             t_tot += t1-t0
@@ -1358,7 +1452,7 @@ subroutine uH_structure_from_gH(H_p, H_c, H_e, uH_p, uH_c, N_det_g, N_det_u,nnz_
         block_end = coo_n_all(i+1) - 1
         if ((block_end - block_start + 1) > 0) then ! this shouldn't be needed
             call wall_time(t0)
-            call insertion_isort(coo_c_all(block_start:block_end), sort_idx, block_end-block_start+1)
+            call quick_isort(coo_c_all(block_start:block_end), sort_idx, block_end-block_start+1)
             call wall_time(t1)
             t_tot += t1-t0
             call unique_from_sorted_buffer(coo_c_all(block_start:block_end), block_end-block_start+1, ubuffer_total)
@@ -1638,7 +1732,7 @@ subroutine get_all_sparse_columns(k_a, columns, row, nnz, nnz_max, N_det_l)
                             n_offset           += n_doubles_bb
 
 
-    call insertion_isort(all_idx, srt_idx, n_off_diagonal+1)
+    call quick_isort(all_idx, srt_idx, n_off_diagonal+1)
 
     columns(:n_off_diagonal+1) = all_idx
     nnz = n_off_diagonal + 1
@@ -1932,7 +2026,7 @@ subroutine get_all_sparse_columns_with_triples(k_a, columns, exc_degree, row, nn
     all_idx(n_offset+1:n_offset+n_triples_tot)    = triples(:n_triples_tot)
     all_degree(n_offset+1:n_offset+n_triples_tot) = triples_case(:n_triples_tot)
 
-    call insertion_isort(all_idx, srt_idx, n_off_diagonal+1)
+    call quick_isort(all_idx, srt_idx, n_off_diagonal+1)
 
     columns(:n_off_diagonal+1) = all_idx
 
@@ -2056,7 +2150,7 @@ subroutine double_sort(rows, cols, n_max, row_starts, N_det_u)
         sort_idx(i) = i
     end do
 
-    call insertion_isort(rows, sort_idx, n_max) ! rows are sorted
+    call quick_isort(rows, sort_idx, n_max) ! rows are sorted
   
     ! sort cols by row, and calculate all row ptrs
     prev_row = rows(1)
@@ -2083,7 +2177,7 @@ subroutine double_sort(rows, cols, n_max, row_starts, N_det_u)
         end do
 
         if (n_cols > 0) then
-            call insertion_isort(cols(row_starts(i):row_starts(i+1)-1), sort_idx(:n_cols), n_cols)
+            call quick_isort(cols(row_starts(i):row_starts(i+1)-1), sort_idx(:n_cols), n_cols)
         end if
     end do
 

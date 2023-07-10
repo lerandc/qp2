@@ -397,6 +397,9 @@ subroutine lanczos_tridiag_sparse_reortho_r(H_v, H_c, H_p, u0, alpha, beta, k, n
     double precision                :: ddot, coef
     double precision                :: dnrm2
     
+    integer :: OMP_get_num_threads, OMP_get_thread_num
+    integer :: jj, kk, n_threads, ID, old_row, target_N
+    integer, allocatable :: pointer_blocks(:), row_starts(:)
     ! prepare arrays
     allocate(uu(sze,k), z(sze))
     incx = 1 
@@ -406,10 +409,53 @@ subroutine lanczos_tridiag_sparse_reortho_r(H_v, H_c, H_p, u0, alpha, beta, k, n
     uu(:,1) = u0
     alpha = 0.d0
     beta = 0.d0
+
+    ! calculate row partitions
+    print *, "Setting up row partitions"
+
+    !$OMP PARALLEL SHARED(pointer_blocks, row_starts, target_N, sze, n_threads, nnz, H_p) PRIVATE(i,jj,kk,ID,old_row)
+    !$ ID = OMP_get_thread_num() + 1
     
+    !$OMP SINGLE
+    !$ n_threads = OMP_get_num_threads()
+    allocate(pointer_blocks(sze+1), row_starts(n_threads+1))
+    pointer_blocks = 0
+    row_starts = 0
+    target_N = nnz / n_threads
+    !$OMP END SINGLE
+
+    ! split the work so that different groups of contiguous rows have roughly equal entries
+    !$OMP DO SCHEDULE(GUIDED)
+    do i = 1, sze+1
+        pointer_blocks(i) = H_p(i) / target_N + 1
+    end do
+    !$OMP END DO
+
+    jj = (sze / n_threads)*(ID-1) + 1 ! start of range
+    kk = (sze / n_threads) * ID + 3 ! end of range, slight overlap to catch boundary pointers
+
+    if (ID == n_threads) kk = sze
+    old_row = pointer_blocks(jj)
+    do i = jj, kk 
+        if(pointer_blocks(i) .ne. old_row) then 
+            row_starts(pointer_blocks(i)) = i
+            old_row = pointer_blocks(i)
+        end if 
+    end do
+    
+    !$OMP BARRIER
+    !$OMP SINGLE
+    row_starts(1) = 1
+    row_starts(n_threads+1) = sze+1
+    deallocate(pointer_blocks)
+    !$OMP END SINGLE
+
+    !$OMP END PARALLEL
+    
+    print *, "Starting Lanczos loop"
     do i = 1, k
         z = 0.d0
-        call sparse_csr_dmv(H_v, H_c, H_p, uu(:,i), z, sze, nnz)
+        call sparse_csr_dmv_row_part(H_v, H_c, H_p, uu(:,i), z, sze, nnz, row_starts, n_threads+1)
         alpha(i) = ddot(sze, z, incx, uu(:,i), incy)
 
         if (i == k) then
@@ -449,5 +495,5 @@ subroutine lanczos_tridiag_sparse_reortho_r(H_v, H_c, H_p, u0, alpha, beta, k, n
         uu(:,i+1) = z / beta(i+1)
     enddo
 
-    deallocate(uu,z)
+    deallocate(uu,z,row_starts)
 end

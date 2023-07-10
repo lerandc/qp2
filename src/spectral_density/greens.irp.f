@@ -251,7 +251,7 @@ BEGIN_PROVIDER [complex*16, greens_R, (greens_omega_N, n_iorb_R, ns_dets)]
     double precision, allocatable ::  uH_v(:)
     integer(bit_kind), allocatable :: I_det_k(:,:,:,:), hash_alpha(:,:), hash_beta(:,:), det_basis(:,:,:), t_det_basis(:,:,:)
     double precision, allocatable  :: psi_coef_intrinsic_excited(:,:,:), psi_coef_coupled_excited(:,:)
-    integer :: hash_value, test_col, mem_err
+    integer :: hash_value, test_col, mem_err, intrinsic_rank, max_union_rank
     double precision :: test_val
 
     ! calculate the maximum size of the sparse arrays with some overflow protection
@@ -310,6 +310,7 @@ BEGIN_PROVIDER [complex*16, greens_R, (greens_omega_N, n_iorb_R, ns_dets)]
         ! if(mem_err /= 0) then
         !     print *, "Allocation failed at before build_R_wavefunction"
         ! end if
+        max_union_rank = 0
         do iorb = 1, n_iorb_R
 
             call build_R_wavefunction(iorb_R(iorb), 1, &
@@ -317,7 +318,9 @@ BEGIN_PROVIDER [complex*16, greens_R, (greens_omega_N, n_iorb_R, ns_dets)]
                                     I_det_k(:,:,:,iorb), &
                                     N_det_l, &
                                     I_cut_k(:,iorb),&
+                                    intrinsic_rank,&
                                     )
+            max_union_rank += intrinsic_rank
         end do
                                 
                                 
@@ -325,7 +328,7 @@ BEGIN_PROVIDER [complex*16, greens_R, (greens_omega_N, n_iorb_R, ns_dets)]
         ! eventually, need a better heuristic for the hash table size to balance size in memory
         ! at larger intrinsic space sizes, this works better since there are more generated determinants 
         ! falling into intersecting spaces
-        hash_table_size =N_det_l * n_iorb_R * 8
+        hash_table_size =N_det_l * n_iorb_R * 32
         hash_prime = 8191
 
         allocate(hash_vals(hash_table_size), hash_alpha(N_int, hash_table_size), hash_beta(N_int, hash_table_size), stat=mem_err)
@@ -346,7 +349,7 @@ BEGIN_PROVIDER [complex*16, greens_R, (greens_omega_N, n_iorb_R, ns_dets)]
 
         call wall_time(t1)
         write(*, "(A42, F8.2, A10)"), "Union space basis and hash table built in ", t1-t0, " seconds"
-        write(*, "(A30, I10)"), "Size of union space: ", n_coupled_dets
+        write(*, "(A30, I10, A1, I10, A1, I10)"), "Size of union space: ", n_coupled_dets, "/", max_union_rank, "/", N_det_l*n_iorb_R
 
         print *, "Building ground state Hamiltonian"
         call wall_time(t0)
@@ -397,7 +400,7 @@ BEGIN_PROVIDER [complex*16, greens_R, (greens_omega_N, n_iorb_R, ns_dets)]
         allocate(psi_coef_coupled_excited(n_coupled_dets, N_states), stat=mem_err)
         psi_coef_coupled_excited = 0.d0
         call build_coupled_wavefunction(psi_coef_intrinsic_excited, psi_coef_coupled_excited, &
-                                        I_cut_k, I_det_k, N_det_l, n_coupled_dets, n_iorb_R, hash_alpha,&
+                                        I_cut_k, I_det_k, I_det_ind, N_det_l, n_coupled_dets, n_iorb_R, hash_alpha,&
                                         hash_beta, hash_vals, hash_prime, hash_table_size)
         
         call wall_time(t1)
@@ -1050,18 +1053,19 @@ subroutine build_A_wavefunction(i_particle, ispin, coef_out, det_out, N_det_l, I
     write(*, "(A20, I8, A1, I8)"), "Rank of N+1 space: ", rank, "/", N_det_l
 end
 
-subroutine build_R_wavefunction(i_hole, ispin, coef_out, det_out, N_det_l, I_k)
+subroutine build_R_wavefunction(i_hole, ispin, coef_out, det_out, N_det_l, I_k, rank)
     implicit none
     BEGIN_DOC
     ! Applies the annihilation operator: a_(i_hole) of
     ! spin = ispin to the current wave function (psi_det, psi_coef)
     END_DOC
     integer, intent(in)            :: i_hole,ispin,N_det_l
+    integer, intent(out), optional :: rank
     integer, intent(out)           :: I_k(N_det_l)
     integer(bit_kind), intent(out) :: det_out(N_int,2,N_det_l)
     double precision, intent(out)  :: coef_out(N_det_l,N_states)
   
-    integer :: k, rank
+    integer :: k
     integer :: i_ok
     double precision :: phase
 
@@ -1154,14 +1158,14 @@ subroutine build_R_wavefunction_complex(i_hole,ispin,coef_out, det_out, N_det_l,
     write(*, "(A20, I8, A1, I8)"), "Rank of N-1 space: ", rank, "/", N_det_l
 end
 
-subroutine build_coupled_wavefunction(intrinsic_psi_coef, coupled_psi_coef, I_cut_k, I_det_k, N_det_s, N_det_t, n_iorb, hash_alpha, hash_beta, hash_vals, hash_prime, ht_size)
+subroutine build_coupled_wavefunction(intrinsic_psi_coef, coupled_psi_coef, I_cut_k, I_det_k, I_det_ind, N_det_s, N_det_t, n_iorb, hash_alpha, hash_beta, hash_vals, hash_prime, ht_size)
     implicit none
     BEGIN_DOC
 
     END_DOC
 
     !! routine arguments
-    integer, intent(in)           :: N_det_s, N_det_t, n_iorb, ht_size, hash_prime, hash_vals(ht_size), I_cut_k(N_det_s, n_iorb)
+    integer, intent(in)           :: N_det_s, N_det_t, n_iorb, ht_size, hash_prime, hash_vals(ht_size), I_cut_k(N_det_s, n_iorb), I_det_ind(N_det_s, n_iorb)
     integer(bit_kind), intent(in) :: hash_alpha(N_int, ht_size), hash_beta(N_int, ht_size), I_det_k(N_int, 2, N_det_s, n_iorb)
     double precision, intent(in)  :: intrinsic_psi_coef(N_det_s, N_states, n_iorb)
 
@@ -1183,9 +1187,11 @@ subroutine build_coupled_wavefunction(intrinsic_psi_coef, coupled_psi_coef, I_cu
     do i = 1, n_iorb
         do j = 1, N_det_s
             if (I_cut_k(j, i) == 1) then
-                target_row_det = I_det_k(:, :, j, i)
-                target_row = hash_value(hash_alpha, hash_beta, hash_vals, hash_prime, ht_size, n_iorb, &
-                            target_row_det(:,1), target_row_det(:,2))
+                ! target_row_det = I_det_k(:, :, j, i)
+                ! target_row = hash_value(hash_alpha, hash_beta, hash_vals, hash_prime, ht_size, n_iorb, &
+                !             target_row_det(:,1), target_row_det(:,2))
+
+                target_row = I_det_ind(j, i)
 
                 do k = 1, N_states
                     coupled_psi_coef(target_row, k) += intrinsic_psi_coef(j, k, i)
