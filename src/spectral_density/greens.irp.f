@@ -409,7 +409,7 @@ BEGIN_PROVIDER [complex*16, greens_R, (greens_omega_N, n_iorb_R, ns_dets)]
         print *, "Beginning Lanczos iteration"
         call wall_time(t0)
         !!! proceed with lanczos iteration as normal
-        call lanczos_tridiag_sparse_reortho_r(uH_v, uH_c, uH_p, psi_coef_coupled_excited(:,1),&
+        call lanczos_tridiag_sparse_reortho_row_part_r(uH_v, uH_c, uH_p, psi_coef_coupled_excited(:,1),&
                                                 alpha, beta,&
                                                 lanczos_N, nnz_max_u, n_coupled_dets)
 
@@ -481,7 +481,7 @@ BEGIN_PROVIDER [complex*16, greens_R, (greens_omega_N, n_iorb_R, ns_dets)]
 
                 ! prepare orthonormal wavefunction in space of N-1 determinants
                 ! remove electron from orbital
-                call build_R_wavefunction(iorb_R(iorb),1,psi_coef_excited,det_excited, N_det_l, I_k)
+                call build_R_wavefunction(iorb_R(iorb),1,psi_coef_excited,det_excited, N_det_l, I_k, intrinsic_rank)
                 norm = dnrm2(N_det_l, psi_coef_excited(:,1), 1)
                 psi_coef_excited = psi_coef_excited / norm
 
@@ -1053,19 +1053,19 @@ subroutine build_A_wavefunction(i_particle, ispin, coef_out, det_out, N_det_l, I
     write(*, "(A20, I8, A1, I8)"), "Rank of N+1 space: ", rank, "/", N_det_l
 end
 
-subroutine build_R_wavefunction(i_hole, ispin, coef_out, det_out, N_det_l, I_k, rank)
+subroutine build_R_wavefunction(i_hole, ispin, coef_out, det_out, N_det_l, I_k, out_rank)
     implicit none
     BEGIN_DOC
     ! Applies the annihilation operator: a_(i_hole) of
     ! spin = ispin to the current wave function (psi_det, psi_coef)
     END_DOC
     integer, intent(in)            :: i_hole,ispin,N_det_l
-    integer, intent(out), optional :: rank
+    integer, intent(out), optional :: out_rank
     integer, intent(out)           :: I_k(N_det_l)
     integer(bit_kind), intent(out) :: det_out(N_int,2,N_det_l)
     double precision, intent(out)  :: coef_out(N_det_l,N_states)
   
-    integer :: k
+    integer :: k, rank
     integer :: i_ok
     double precision :: phase
 
@@ -1087,6 +1087,7 @@ subroutine build_R_wavefunction(i_hole, ispin, coef_out, det_out, N_det_l, I_k, 
     enddo
 
     write(*, "(A20, I8, A1, I8)"), "Rank of N-1 space: ", rank, "/", N_det_l
+    out_rank = rank
 end
 
 subroutine build_A_wavefunction_complex(i_particle, ispin, coef_out, det_out, N_det_l, I_k)

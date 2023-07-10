@@ -397,6 +397,88 @@ subroutine lanczos_tridiag_sparse_reortho_r(H_v, H_c, H_p, u0, alpha, beta, k, n
     double precision                :: ddot, coef
     double precision                :: dnrm2
     
+    ! prepare arrays
+    allocate(uu(sze,k), z(sze))
+    incx = 1 
+    incy = 1
+
+    ! initialize vectors
+    uu(:,1) = u0
+    alpha = 0.d0
+    beta = 0.d0
+    do i = 1, k
+        z = 0.d0
+        call sparse_csr_dmv(H_v, H_c, H_p, uu(:,i), z, sze, nnz)
+        alpha(i) = ddot(sze, z, incx, uu(:,i), incy)
+
+        if (i == k) then
+            exit
+        end if
+        
+        ! Gram-Schmidt reorthogonalization
+        ! subtract out all previously extracted basis vectors from current vector
+        ! needed for numerical stability
+        do ii = 1, 2 ! repeat process twice
+            !$OMP PARALLEL PRIVATE(j, z_t, coef) SHARED(sze, incx, incy, uu, z)
+            allocate(z_t(sze))
+            z_t = 0.d0
+            !$OMP DO SCHEDULE(GUIDED)
+            do j = 1, i
+                coef = ddot(sze, z, incx, uu(:,j), incy)                
+                z_t = z_t + coef * uu(:,j)
+            enddo
+            !$OMP END DO
+            
+            !$OMP CRITICAL
+            z = z - z_t
+            !$OMP END CRITICAL
+            deallocate(z_t)
+            !$OMP END PARALLEL
+        enddo 
+        
+        beta(i+1) = dnrm2(sze, z, incx)
+        if (beta(i+1) < 1e-16) then ! some small number
+        ! add some type of escape or warning for beta(i) = 0
+            print *, 'Ending Lanczos algorithm:'
+            write(*, '(A20, I10, A20, E12.4, A20, E12.4)'), 'final iter: ', i, ' final beta', beta(i+1), ' previous beta', beta(i)
+            deallocate(uu,z)
+            exit
+        end if
+
+        uu(:,i+1) = z / beta(i+1)
+    enddo
+
+    deallocate(uu,z)
+end
+
+subroutine lanczos_tridiag_sparse_reortho_row_part_r(H_v, H_c, H_p, u0, alpha, beta, k, nnz, sze)
+    implicit none
+    BEGIN_DOC
+    ! Function that performs lanczos triadiaglonization of a sparse, real, symmetric matrix
+    ! Performs reorthogonalization of intermediate vectors
+    ! See https://doi.org/10.1137/1.9781611971446, Chs. 6.6, 7.3, 7.4
+    ! Outputs triadiagonlized Hermitian matrix as alpha and beta vectors
+    ! Outputs up to k elements of tridiagonlization and orthogonal basis (testing only)
+
+    ! Expects H in CSR format
+    ! H_v are non-zero values of H
+    ! H_c are column indices of H
+    ! H_p are the row pointers for H
+    ! u0 is initial orthonormal vector
+    ! uu is orthonormal basis
+    ! alpha, beta are output tridiagonal coefficients
+    ! k is number of lanczos vectors to extract
+    ! sze is number of columns in matrix
+    END_DOC
+
+    integer, intent(in)             :: k, sze, nnz, H_c(nnz), H_p(sze+1)
+    integer                         :: i, ii, j, incx, incy
+    double precision, intent(in)    :: H_v(nnz), u0(sze)
+    double precision, allocatable   :: uu(:,:), z(:), z_t(:)
+    double precision, intent(out)   :: alpha(k), beta(k)
+    double precision                :: ddot, coef
+    double precision                :: dnrm2
+    
     integer :: OMP_get_num_threads, OMP_get_thread_num
     integer :: jj, kk, n_threads, ID, old_row, target_N
     integer, allocatable :: pointer_blocks(:), row_starts(:)
@@ -451,7 +533,7 @@ subroutine lanczos_tridiag_sparse_reortho_r(H_v, H_c, H_p, u0, alpha, beta, k, n
     !$OMP END SINGLE
 
     !$OMP END PARALLEL
-    
+
     print *, "Starting Lanczos loop"
     do i = 1, k
         z = 0.d0
