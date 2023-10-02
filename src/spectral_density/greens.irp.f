@@ -235,9 +235,10 @@ BEGIN_PROVIDER [complex*16, greens_R, (greens_omega_N, n_iorb_R, ns_dets)]
     double precision        :: E0, norm, dnrm2, pi
     double precision        :: t0, t1
     complex*16              :: z(greens_omega_N), zalpha(lanczos_N), bbeta(lanczos_N), cfraction_c
-    integer                 :: i, iorb, nnz, nnz_l, i_n_det, N_det_l
-    integer(kind=8)         :: s_max_sze
-    integer, allocatable    :: H_c(:), H_p(:), t_H_c(:), H_c_all(:), H_p_all(:), I_k(:)
+    integer                 :: i, iorb, i_n_det, N_det_l
+    integer(kind=8)         :: nnz, nnz_l, s_max_sze
+    integer, allocatable    :: H_c(:), t_H_c(:), H_c_all(:), I_k(:)
+    integer(kind=8), allocatable :: H_p(:), H_p_all(:)
     double precision , allocatable ::  H_v(:), t_H_v(:), psi_coef_excited(:,:) 
     integer(bit_kind), allocatable :: det_excited(:,:,:)
     character(len=72)       :: filename
@@ -245,9 +246,11 @@ BEGIN_PROVIDER [complex*16, greens_R, (greens_omega_N, n_iorb_R, ns_dets)]
 
     ! variables specifically used for orbital coupling procedures
     logical                 :: orbital_coupling, hash_success
-    integer                 :: hash_table_size, n_coupled_dets, hash_prime, nnz_max_u, ref_count, ref_degree_a, ref_degree_b, test_degree_a, test_degree_b, j, k
+    integer                 :: hash_table_size, n_coupled_dets, hash_prime, ref_count, ref_degree_a, ref_degree_b, test_degree_a, test_degree_b, j, k
+    integer(kind=8)         :: nnz_max_u
     integer, allocatable    :: I_cut_k(:,:), hash_vals(:), H_e_all(:), t_H_e(:)
-    integer, allocatable    :: uH_p(:), uH_c(:), t_uH_c(:), I_det_ind(:,:)
+    integer, allocatable    :: uH_c(:), t_uH_c(:), I_det_ind(:,:)
+    integer(kind=8), allocatable :: uH_p(:)
     double precision, allocatable ::  uH_v(:)
     integer(bit_kind), allocatable :: I_det_k(:,:,:,:), hash_alpha(:,:), hash_beta(:,:), det_basis(:,:,:), t_det_basis(:,:,:)
     double precision, allocatable  :: psi_coef_intrinsic_excited(:,:,:), psi_coef_coupled_excited(:,:)
@@ -256,16 +259,20 @@ BEGIN_PROVIDER [complex*16, greens_R, (greens_omega_N, n_iorb_R, ns_dets)]
 
     ! calculate the maximum size of the sparse arrays with some overflow protection
     ! could still be much improved
+    s_max_sze = 0
+    print *, s_max_sze
     if (nnz_max_per_row > 0) then
         s_max_sze = max_row_sze_factor*nnz_max_per_row
     else 
         s_max_sze = max_row_sze_factor*1000000 
     end if
     
-    if (s_max_sze < 0) then
+    print *, s_max_sze
+    if (s_max_sze <= 0) then
         print *, "Desired max row size is hitting integer overflow. Setting max size to 2^32"
-        s_max_sze = 2**32
+        s_max_sze = 2_8**32
     end if
+    print *, s_max_sze
     
     print *, "Calculating spectral densities for removed electrons in orbitals: "
     
@@ -353,6 +360,7 @@ BEGIN_PROVIDER [complex*16, greens_R, (greens_omega_N, n_iorb_R, ns_dets)]
 
         print *, "Building ground state Hamiltonian"
         call wall_time(t0)
+        print *, "Max allowable size:", s_max_sze
         allocate(H_p_all(N_det_l+1), H_c_all(s_max_sze), H_e_all(s_max_sze))
 
         !!! get ground state sparsity structure with triples and values corresponding to excitation degree
@@ -373,11 +381,12 @@ BEGIN_PROVIDER [complex*16, greens_R, (greens_omega_N, n_iorb_R, ns_dets)]
         ! heuristic maximum number of nonzero elements on the union space should be nnz with triples
         print *, "Constructing coupled matrix"
         call wall_time(t0)
-        nnz_max_u = 2*nnz
+        nnz_max_u = 2_8*nnz !n_iorb_R*n_iorb_R*nnz
+        print *, nnz_max_u
         allocate(uH_p(n_coupled_dets+1), uH_c(nnz_max_u), stat=mem_err)
-        ! if(mem_err /= 0) then
-        !     print *, "Allocation failed for union state matrix"
-        ! end if
+        if(mem_err /= 0) then
+            print *, "Allocation failed for union state matrix", mem_err
+        end if
         call uH_structure_from_gH(H_p_all, H_c_all, H_e_all, uH_p, uH_c,&
                             N_det_l, n_coupled_dets, nnz, nnz_max_u, n_iorb_R,&
                             hash_alpha, hash_beta, hash_vals, hash_prime, hash_table_size,&

@@ -389,7 +389,9 @@ subroutine lanczos_tridiag_sparse_reortho_r(H_v, H_c, H_p, u0, alpha, beta, k, n
     ! sze is number of columns in matrix
     END_DOC
 
-    integer, intent(in)             :: k, sze, nnz, H_c(nnz), H_p(sze+1)
+    integer, intent(in)             :: k, sze
+    integer(kind=8), intent(in)     :: nnz, H_p(sze+1)
+    integer, intent(in)             :: H_c(nnz)
     integer                         :: i, ii, j, incx, incy
     double precision, intent(in)    :: H_v(nnz), u0(sze)
     double precision, allocatable   :: uu(:,:), z(:), z_t(:)
@@ -471,7 +473,9 @@ subroutine lanczos_tridiag_sparse_reortho_row_part_r(H_v, H_c, H_p, u0, alpha, b
     ! sze is number of columns in matrix
     END_DOC
 
-    integer, intent(in)             :: k, sze, nnz, H_c(nnz), H_p(sze+1)
+    integer, intent(in)             :: k, sze
+    integer(kind=8), intent(in)     :: nnz, H_p(sze+1)
+    integer, intent(in)             :: H_c(nnz)
     integer                         :: i, ii, j, incx, incy
     double precision, intent(in)    :: H_v(nnz), u0(sze)
     double precision, allocatable   :: uu(:,:), z(:), z_t(:)
@@ -479,8 +483,8 @@ subroutine lanczos_tridiag_sparse_reortho_row_part_r(H_v, H_c, H_p, u0, alpha, b
     double precision                :: ddot, coef
     double precision                :: dnrm2
     
-    integer :: OMP_get_num_threads, OMP_get_thread_num
-    integer :: jj, kk, n_threads, ID, old_row, target_N
+    integer :: OMP_get_num_threads, OMP_get_thread_num, n_threads, ID
+    integer :: jj, kk, old_row, target_N
     integer, allocatable :: pointer_blocks(:), row_starts(:)
     ! prepare arrays
     allocate(uu(sze,k), z(sze))

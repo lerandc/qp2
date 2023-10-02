@@ -37,11 +37,13 @@ subroutine sparse_csr_dmv(A_v, A_c, A_p, x, y, sze, nnz)
     ! nnz is the total number of nonzero entries in A
     END_DOC
 
-    integer,          intent(in)  :: sze, nnz, A_c(nnz), A_p(sze+1)
+    integer,          intent(in)  :: sze
+    integer(kind=8),  intent(in)  :: nnz, A_p(sze+1)
+    integer,          intent(in)  :: A_c(nnz)
     double precision, intent(in)  :: A_v(nnz), x(sze)
     double precision, intent(out) :: y(sze)
     double precision, allocatable :: y_t(:)
-    integer                       :: i, j
+    integer(kind=8)               :: i, j
 
     !$OMP PARALLEL PRIVATE(i, j, y_t) SHARED(y, x, A_c, A_p, A_v, sze)
     allocate(y_t(sze))
@@ -95,12 +97,14 @@ subroutine sparse_csr_dmv_row_part(A_v, A_c, A_p, x, y, sze, nnz, row_starts, n_
     ! nnz is the total number of nonzero entries in A
     END_DOC
 
-    integer,          intent(in)  :: sze, nnz, n_threads, A_c(nnz), A_p(sze+1), row_starts(n_threads)
+    integer,          intent(in)  :: sze, n_threads, row_starts(n_threads)
+    integer(kind=8),  intent(in)  :: nnz, A_p(sze+1)
+    integer,          intent(in)  :: A_c(nnz)
     double precision, intent(in)  :: A_v(nnz), x(sze)
     double precision, intent(out) :: y(sze)
     double precision, allocatable :: y_t(:)
-    integer                       :: i, j, ID
-    integer :: OMP_get_thread_num
+    integer(kind=8)               :: i, j 
+    integer :: OMP_get_thread_num, ID
 
 
     !$OMP PARALLEL PRIVATE(i, j, y_t, ID) SHARED(y, x, A_c, A_p, A_v, sze, row_starts)
@@ -227,7 +231,7 @@ subroutine sparse_csr_MM(A_c, A_p, I_k, B_c, B_p, sze, nnz_in)
     integer :: OMP_get_num_threads, OMP_get_thread_num
     integer, allocatable :: nnz_arr(:), coo_r(:), coo_c(:)
     integer, allocatable :: coo_r_all(:), coo_c_all(:), coo_r_t(:), coo_c_t(:)
-    integer, allocatable:: coo_s(:), csr_n(:)
+    integer, allocatable:: coo_s(:)
     double precision     :: frac
 
 
@@ -395,14 +399,18 @@ subroutine sparse_csr_MM_row_part(A_c, A_p, I_k, B_c, B_p, sze, nnz_in)
     END_DOC
     implicit none
 
-    integer, intent(in) :: sze, nnz_in, A_c(nnz_in), A_p(sze+1), I_k(sze)
-    integer, intent(out):: B_c(nnz_in), B_p(sze+1)
-    integer :: i, j, k, ii, kk, lcol, nnz_cnt, old_row, nnz_tot
-    integer              :: n_vals, n_threads, ID, scn_a, nnz
+    integer,         intent(in) :: sze 
+    integer(kind=8), intent(in) :: nnz_in, A_p(sze+1)
+    integer, intent(in) :: A_c(nnz_in), I_k(sze)
+    integer, intent(out):: B_c(nnz_in)
+    integer(kind=8), intent(out) :: B_p(sze+1)
+    integer :: lcol
+    integer(kind=8) :: i, j, k, ii, kk, nnz_cnt, old_row, nnz_tot, scn_a
+    integer              :: n_vals, n_threads, ID, nnz
     integer :: OMP_get_num_threads, OMP_get_thread_num
     integer, allocatable :: nnz_arr(:), coo_r(:), coo_c(:)
     integer, allocatable :: coo_r_all(:), coo_c_all(:), coo_r_t(:), coo_c_t(:)
-    integer, allocatable:: coo_s(:), csr_n(:)
+    integer(kind=8), allocatable :: coo_s(:)
     double precision     :: frac
 
     integer :: target_N, row_start, row_end
@@ -587,21 +595,22 @@ subroutine get_sparsity_structure(csr_s, csr_c, sze, N_det_l)
     END_DOC
 
     integer, intent(in)           :: N_det_l
-    integer(kind=8), intent(in)        :: sze
-    integer, intent(out)          :: csr_s(N_det_l+1), csr_c(sze)
+    integer(kind=8), intent(in)   :: sze
+    integer, intent(out)          :: csr_c(sze)
+    integer(kind=8), intent(out)   :: csr_s(N_det_l+1)
 
-    integer              :: n, i, j, k, l_row, old_row
-    integer              :: nnz, nnz_cnt, nnz_tot
+    integer              :: l_row
+    integer              :: nnz, nnz_cnt
     integer              :: n_vals, n_vals_row, n_threads, ID
-    integer              :: nnz_csr, ii, scn_a, kk
+    integer(kind=8)      :: nnz_tot, i, j, k, ii, kk, scn_a, old_row
     integer :: OMP_get_num_threads, OMP_get_thread_num
-    integer, allocatable :: nnz_arr(:), coo_r(:), coo_c(:), l_cols(:)
+    integer, allocatable :: nnz_arr(:), coo_r(:), coo_c(:), l_cols(:), coo_n(:)
     integer, allocatable :: coo_r_all(:), coo_c_all(:), coo_r_t(:), coo_c_t(:)
-    integer, allocatable:: coo_s(:), coo_n(:)
+    integer(kind=8), allocatable:: coo_s(:) 
     double precision     :: frac
     
 
-    !$OMP PARALLEL SHARED(nnz_tot, nnz_arr, nnz_csr, n_threads, N_det, N_det_l, nnz_max_per_row, n_vals_row,&
+    !$OMP PARALLEL SHARED(nnz_tot, nnz_arr, n_threads, N_det, N_det_l, nnz_max_per_row, n_vals_row,&
     !$OMP                 coo_r_all, coo_c_all, csr_s, csr_c, coo_s, coo_n)& 
     !$OMP PRIVATE(i, j , old_row, k, ii, kk, scn_a, ID, nnz, nnz_cnt, coo_r, coo_c, coo_r_t, coo_c_t, l_cols, l_row) 
 
@@ -794,20 +803,22 @@ subroutine get_sparsity_structure_with_triples(csr_s,csr_c,csr_e,sze,N_det_l)
     END_DOC
 
     integer, intent(in)           :: N_det_l
-    integer(kind=8), intent(in)        :: sze
-    integer, intent(out)          :: csr_s(N_det_l+1), csr_c(sze), csr_e(sze)
+    integer(kind=8), intent(in)   :: sze
+    integer, intent(out)          :: csr_c(sze), csr_e(sze)
+    integer(kind=8), intent(out)   :: csr_s(N_det_l+1)
 
-    integer              :: i, j, k, ii, kk,  l_row, old_row
-    integer              :: nnz, nnz_cnt, nnz_tot
+    integer              :: l_row
+    integer              :: nnz, nnz_cnt
     integer              :: n_vals, n_vals_row, n_threads, ID
-    integer              :: nnz_csr, scn_a, stat
+    integer              :: stat
+    integer(kind=8)      :: nnz_tot, i, j, k, ii, kk, scn_a, old_row
     integer :: OMP_get_num_threads, OMP_get_thread_num
-    integer, allocatable :: nnz_arr(:), coo_r(:), coo_c(:), coo_e(:), l_cols(:), l_exc(:)
+    integer, allocatable :: nnz_arr(:), coo_r(:), coo_c(:), coo_e(:), l_cols(:), l_exc(:), coo_n(:)
     integer, allocatable :: coo_r_all(:), coo_c_all(:), coo_e_all(:), coo_r_t(:), coo_c_t(:), coo_e_t(:)
-    integer, allocatable :: coo_s(:), coo_n(:)
+    integer(kind=8), allocatable :: coo_s(:)
     double precision     :: frac
     
-    !$OMP PARALLEL SHARED(nnz_tot, nnz_arr, nnz_csr, n_threads, N_det, N_det_l, nnz_max_per_row, n_vals_row,&
+    !$OMP PARALLEL SHARED(nnz_tot, nnz_arr, n_threads, N_det, N_det_l, n_vals_row,&
     !$OMP                 coo_r_all, coo_c_all, coo_e_all, csr_s, csr_c, csr_e, coo_s, coo_n, sze)& 
     !$OMP PRIVATE(stat, i,j,k,ii,kk,old_row, scn_a, ID, nnz, nnz_cnt, coo_r, coo_c, coo_e, coo_r_t, coo_c_t, coo_e_t, l_cols, l_exc, l_row, frac) 
 
@@ -825,7 +836,7 @@ subroutine get_sparsity_structure_with_triples(csr_s,csr_c,csr_e,sze,N_det_l)
     ! ! initial allocation sizes for vectors
     frac = 0.2
     n_vals = max(nint(N_det_l*N_det_l*frac/n_threads), 128)
-    n_vals_row = min(N_det_l, nnz_max_per_row)
+    n_vals_row = N_det_l !min(N_det_l, nnz_max_per_row)
 
     allocate(coo_r(n_vals), coo_c(n_vals), coo_e(n_vals), l_cols(n_vals_row), l_exc(n_vals_row))
     nnz_cnt = 0
@@ -966,8 +977,10 @@ subroutine uH_structure_from_gH(H_p, H_c, H_e, uH_p, uH_c, N_det_g, N_det_u,nnz_
     implicit none
     
     !! input data
-    integer, intent(in) :: N_det_g, N_det_u, nnz_g, nnz_max, N_exc
-    integer, intent(in) :: H_p(N_det_g+1), H_c(nnz_g), H_e(nnz_g)
+    integer(kind=8), intent(in) :: nnz_g, nnz_max
+    integer, intent(in) :: N_det_g, N_det_u, N_exc
+    integer, intent(in) :: H_c(nnz_g), H_e(nnz_g)
+    integer(kind=8), intent(in) :: H_p(N_det_g+1)
     
     integer, intent(in) :: hash_table_size, hash_prime
     integer, intent(in) :: hash_alpha(hash_table_size), hash_beta(hash_table_size), hash_vals(hash_table_size)
@@ -977,7 +990,8 @@ subroutine uH_structure_from_gH(H_p, H_c, H_e, uH_p, uH_c, N_det_g, N_det_u,nnz_
     integer(bit_kind), intent(in)   :: I_det_k(N_int, 2, N_det_g, N_exc)
     
     !! output data
-    integer, intent(out) :: uH_p(N_det_u+1), uH_c(nnz_max)
+    integer, intent(out) :: uH_c(nnz_max)
+    integer(kind=8), intent(out) :: uH_p(N_det_u+1)
 
     !! hash functions
     integer :: hash_value
@@ -986,20 +1000,20 @@ subroutine uH_structure_from_gH(H_p, H_c, H_e, uH_p, uH_c, N_det_g, N_det_u,nnz_
     integer :: OMP_get_num_threads, OMP_get_thread_num
 
     !! routine variables
-    integer             :: i, ii, j, jj, k, kk
-    integer             :: i_exc, j_exc, row, pidx, col, target_row, target_col, cur_exc_degree
+    integer(kind=8)     :: i, ii, j, jj, k, kk, scn_a, pidx, block_start, block_end, umax_block_size
+    integer             :: i_exc, j_exc, row, col, target_row, target_col, cur_exc_degree
     integer*1           :: bit_degree, criterion_a_mask, criterion_b_mask, criterion_c_mask, bit_map(8)
-    integer             :: target_N, n_threads, ID, scn_a
+    integer             :: target_N, n_threads, ID
     integer(bit_kind)   :: target_row_det(N_int, 2), target_col_det(N_int, 2)
     logical             :: block_a, block_b, criterion_a, criterion_b, criterion_c, pass_a, pass_b, pass_c, add_pair
 
-    integer              :: buffer_count, nts_buffer_count, max_new_entries, buffer_total, ubuffer_total, umax_block_size
-    integer              :: block_start, block_end, nts_block_start, nts_block_end, block_total, max_block_size
+    integer              :: buffer_count, nts_buffer_count, max_new_entries, buffer_total, ubuffer_total
+    integer              :: nts_block_start, nts_block_end, block_total, max_block_size
 
     integer, allocatable :: coo_r(:), coo_c(:), coo_n(:), coo_r_nts(:), coo_c_nts(:), coo_n_nts(:)
-    integer, allocatable :: u_coo_r(:), u_coo_c(:), u_coo_n(:), u_block_rows(:,:)
-    integer, allocatable :: coo_c_all(:), coo_n_all(:), nnz_arr(:,:), u_coo_n_all(:)
-    integer, allocatable :: t_coo_r(:), t_coo_c(:), sort_idx(:)
+    integer, allocatable :: u_coo_r(:), u_coo_c(:), u_coo_n(:)
+    integer, allocatable :: coo_c_all(:), t_coo_r(:), t_coo_c(:), sort_idx(:)
+    integer(kind=8), allocatable :: coo_n_all(:), nnz_arr(:,:), u_coo_n_all(:),  u_block_rows(:,:)
     integer, allocatable :: row_starts(:), pointer_blocks(:)
     integer              :: row_start, row_end, old_row
 
@@ -1048,6 +1062,7 @@ subroutine uH_structure_from_gH(H_p, H_c, H_e, uH_p, uH_c, N_det_g, N_det_u,nnz_
     ! split the work so that different groups of contiguous rows have roughly equal entries
     !$OMP DO SCHEDULE(GUIDED)
     do i = 1, N_det_g+1
+        ! if ((H_p(i)/target_N + 1) < 0)
         pointer_blocks(i) = H_p(i) / target_N + 1
     end do
     !$OMP END DO
@@ -1483,6 +1498,8 @@ subroutine uH_structure_from_gH(H_p, H_c, H_e, uH_p, uH_c, N_det_g, N_det_u,nnz_
         !$OMP SCAN INCLUSIVE(scn_a)
         uH_p(i) = scn_a
     end do
+
+    print *, "Total nonzero entries in union Hamiltonian: ", uH_p(N_det_u+1)-1, " max size: ", nnz_max
     !$OMP END SINGLE
     !$OMP BARRIER
 
@@ -1862,7 +1879,7 @@ subroutine get_all_sparse_columns_with_triples(k_a, columns, exc_degree, row, nn
     deallocate(buffer, idx)
 
     ! Finding (1,1) excitations
-    allocate(buffer(N_int, N_det), idx(N_det))
+    ! allocate(buffer(N_int, N_det), idx(N_det))
     allocate(doubles_ab(N_det))
 
     n_buffer = 0
@@ -1872,63 +1889,67 @@ subroutine get_all_sparse_columns_with_triples(k_a, columns, exc_degree, row, nn
     ! starting from list of beta singles does not give all the (1,1) excitations
     ! so we need to search over either all beta or all alpha at some point
     ! start from (0,1) to excite to (1,1)
-    do j = 1, n_det_beta_unique
+    ! do j = 1, n_det_beta_unique
 
-        ! kcol = psi_bilinear_matrix_columns(j)
+    !     ! kcol = psi_bilinear_matrix_columns(j)
 
-        tmp_det2(:,2) = psi_det_beta_unique (:, j)
+    !     tmp_det2(:,2) = psi_det_beta_unique (:, j)
 
-        ! check if a single excitation different
-        tdegree_beta = 0
-        do i = 1, N_int
-            tdegree_beta += popcnt(ieor(tmp_det2(i,2), ref_det(i,2)))
-        end do
+    !     ! check if a single excitation different
+    !     tdegree_beta = 0
+    !     do i = 1, N_int
+    !         tdegree_beta += popcnt(ieor(tmp_det2(i,2), ref_det(i,2)))
+    !     end do
 
-        if (tdegree_beta /= 2) then
-            cycle
-        end if
+    !     if (tdegree_beta /= 2) then
+    !         cycle
+    !     end if
 
-        ! loop over same beta different alpha
-        do i = psi_bilinear_matrix_columns_loc(j), psi_bilinear_matrix_columns_loc(j+1)-1
-            lidx = psi_bilinear_matrix_order(i)
+    !     ! loop over same beta different alpha
+    !     do i = psi_bilinear_matrix_columns_loc(j), psi_bilinear_matrix_columns_loc(j+1)-1
+    !         lidx = psi_bilinear_matrix_order(i)
 
-            ! check if determinant is in upper half of reduced Hamiltonian matrix
-            if ((lidx <= kidx) .or. (lidx > N_det_l)) cycle
+    !         ! check if determinant is in upper half of reduced Hamiltonian matrix
+    !         if ((lidx <= kidx) .or. (lidx > N_det_l)) cycle
 
-            lcol = psi_bilinear_matrix_columns(i)
-            lrow = psi_bilinear_matrix_rows(i)
+    !         lcol = psi_bilinear_matrix_columns(i)
+    !         lrow = psi_bilinear_matrix_rows(i)
 
-            tmp_det(:,1) = psi_det_alpha_unique(:, lrow)
-            tmp_det(:,2) = psi_det_beta_unique (:, lcol)
+    !         tmp_det(:,1) = psi_det_alpha_unique(:, lrow)
+    !         tmp_det(:,2) = psi_det_beta_unique (:, lcol)
 
-            ! add determinant to buffer
-            ! buffer is list of alpha spin determinants
-            n_buffer += 1
-            buffer(:,n_buffer) = tmp_det(:,1)
-            idx(n_buffer) = lidx
-        end do
+    !         ! add determinant to buffer
+    !         ! buffer is list of alpha spin determinants
+    !         n_buffer += 1
+    !         buffer(:,n_buffer) = tmp_det(:,1)
+    !         idx(n_buffer) = lidx
+    !     end do
 
-        sdet_a = ref_det(:,1)
+    !     sdet_a = ref_det(:,1)
 
-        ! all determinants are (X,1) excitations from ref_det
-        ! so we just need to check alpha channel now
-        ! grab indices of all determinants in buffer related to ref_det by (1,1) excitations 
-        call get_all_spin_singles(buffer(:,n_buffer_old+1:n_buffer), idx(n_buffer_old+1:n_buffer),&
-                                sdet_a, N_int, n_buffer-n_buffer_old,&
-                                doubles_ab(n_doubles_ab_tot+1:n_doubles_ab_tot+n_buffer-n_buffer_old),&
-                                n_doubles_ab)
+    !     ! all determinants are (X,1) excitations from ref_det
+    !     ! so we just need to check alpha channel now
+    !     ! grab indices of all determinants in buffer related to ref_det by (1,1) excitations 
+    !     call get_all_spin_singles(buffer(:,n_buffer_old+1:n_buffer), idx(n_buffer_old+1:n_buffer),&
+    !                             sdet_a, N_int, n_buffer-n_buffer_old,&
+    !                             doubles_ab(n_doubles_ab_tot+1:n_doubles_ab_tot+n_buffer-n_buffer_old),&
+    !                             n_doubles_ab)
 
 
-        n_buffer_old = n_buffer
-        n_doubles_ab_tot += n_doubles_ab
-    end do
+    !     n_buffer_old = n_buffer
+    !     n_doubles_ab_tot += n_doubles_ab
+    ! end do
 
 
     !!! Finding triple excitations of form (3,0), (2,1), and (1,2)
+    ! also, find (1,1) at the same time
     ! start from (0,0), (0,1), (0,2) to excite to (3,0), (2,1), (1,2)
     n_triples_tot = 0
     allocate(triples(N_det_l), triples_case(N_det_l))
 
+    integer :: exc_map(0:4)
+
+    exc_map = (/3, 0, 8, 0, 7/)
     do j = 1, n_det_beta_unique
 
         ! kcol = psi_bilinear_matrix_columns(k)
@@ -1969,17 +1990,21 @@ subroutine get_all_sparse_columns_with_triples(k_a, columns, exc_degree, row, nn
             if (tdegree_alpha + tdegree_beta == 6) then
                 n_triples_tot += 1
                 triples(n_triples_tot) = lidx
-                select case (tdegree_beta)
-                    case (0)
-                        triples_case(n_triples_tot) = 3
-                    case (2)
-                        triples_case(n_triples_tot) = 8
-                    case (4)
-                        triples_case(n_triples_tot) = 7
-                    case default
-                        write(*, ("(A40, I16, I16, I16)")),"Error in triple selection on krow/beta det/alpha det: ", k_a, j, i
-                        exit
-                end select
+                triples_case(n_triples_tot) = exc_map(tdegree_beta)
+                ! select case (tdegree_beta)
+                !     case (0)
+                !         triples_case(n_triples_tot) = 3
+                !     case (2)
+                !         triples_case(n_triples_tot) = 8
+                !     case (4)
+                !         triples_case(n_triples_tot) = 7
+                !     case default
+                !         write(*, ("(A40, I16, I16, I16)")),"Error in triple selection on krow/beta det/alpha det: ", k_a, j, i
+                !         exit
+                ! end select
+            else if ((tdegree_alpha == 2) .and. (tdegree_beta == 2)) then ! add (1,1) excitations in same loop
+                n_doubles_ab_tot += 1
+                doubles_ab(n_doubles_ab_tot) = lidx
             end if
 
         end do
@@ -1991,56 +2016,57 @@ subroutine get_all_sparse_columns_with_triples(k_a, columns, exc_degree, row, nn
     ! number of off-diagonal terms needed to caclulate to fill this row in sparse Hamlitonian
     n_off_diagonal = n_singles_a + n_singles_b + n_doubles_aa + n_doubles_ab_tot + n_doubles_bb + n_triples_tot
 
-    allocate(all_degree(n_off_diagonal+1), all_idx(n_off_diagonal+1), srt_idx(n_off_diagonal+1))
+    ! allocate(all_degree(n_off_diagonal+1), all_idx(n_off_diagonal+1), srt_idx(n_off_diagonal+1))
 
-    do i = 1, n_off_diagonal+1
-        srt_idx(i) = i
-    end do
+    ! do i = 1, n_off_diagonal+1
+    !     srt_idx(i) = i
+    ! end do
   
     ! a - 1; aa - 2; aaa -3; b - 4; bb - 5; ab - 6; abb - 7; aab - 8
     n_offset = 0
-    all_idx(n_offset+1:n_offset+1)               = kidx
-    all_degree(n_offset+1:n_offset+1)            = 0
+    columns(n_offset+1:n_offset+1)               = kidx
+    exc_degree(n_offset+1:n_offset+1)            = 0
                             n_offset            += 1
 
-    all_idx(n_offset+1:n_offset+n_singles_a)     = singles_a(:n_singles_a)
-    all_degree(n_offset+1:n_offset+n_singles_a)  = 1
+    columns(n_offset+1:n_offset+n_singles_a)     = singles_a(:n_singles_a)
+    exc_degree(n_offset+1:n_offset+n_singles_a)  = 1
                             n_offset            += n_singles_a
 
-    all_idx(n_offset+1:n_offset+n_singles_b)     = singles_b(:n_singles_b)
-    all_degree(n_offset+1:n_offset+n_singles_b)  = 3
+    columns(n_offset+1:n_offset+n_singles_b)     = singles_b(:n_singles_b)
+    exc_degree(n_offset+1:n_offset+n_singles_b)  = 3
                             n_offset            += n_singles_b
 
-    all_idx(n_offset+1:n_offset+n_doubles_aa)    = doubles_aa(:n_doubles_aa)
-    all_degree(n_offset+1:n_offset+n_doubles_aa) = 2
+    columns(n_offset+1:n_offset+n_doubles_aa)    = doubles_aa(:n_doubles_aa)
+    exc_degree(n_offset+1:n_offset+n_doubles_aa) = 2
                             n_offset            += n_doubles_aa
 
-    all_idx(n_offset+1:n_offset+n_doubles_ab_tot)    = doubles_ab(:n_doubles_ab_tot)
-    all_degree(n_offset+1:n_offset+n_doubles_ab_tot) = 6
+    columns(n_offset+1:n_offset+n_doubles_ab_tot)    = doubles_ab(:n_doubles_ab_tot)
+    exc_degree(n_offset+1:n_offset+n_doubles_ab_tot) = 6
                             n_offset                += n_doubles_ab_tot
 
-    all_idx(n_offset+1:n_offset+n_doubles_bb)     = doubles_bb(:n_doubles_bb)
-    all_degree(n_offset+1:n_offset+n_doubles_bb)  = 5
+    columns(n_offset+1:n_offset+n_doubles_bb)     = doubles_bb(:n_doubles_bb)
+    exc_degree(n_offset+1:n_offset+n_doubles_bb)  = 5
                             n_offset             += n_doubles_bb
 
-    all_idx(n_offset+1:n_offset+n_triples_tot)    = triples(:n_triples_tot)
-    all_degree(n_offset+1:n_offset+n_triples_tot) = triples_case(:n_triples_tot)
+    columns(n_offset+1:n_offset+n_triples_tot)    = triples(:n_triples_tot)
+    exc_degree(n_offset+1:n_offset+n_triples_tot) = triples_case(:n_triples_tot)
 
-    call quick_isort(all_idx, srt_idx, n_off_diagonal+1)
+    ! call quick_isort(all_idx, srt_idx, n_off_diagonal+1)
 
-    columns(:n_off_diagonal+1) = all_idx
+    ! columns(:n_off_diagonal+1) = all_idx
 
-    do i = 1, n_off_diagonal+1
-        exc_degree(i) = all_degree(srt_idx(i))
-    end do
+    ! do i = 1, n_off_diagonal+1
+        ! exc_degree(i) = all_degree(srt_idx(i))
+    ! end do
 
     nnz = n_off_diagonal + 1
     row = kidx
     
-    deallocate(buffer, idx, singles_a, doubles_aa,&
+    ! deallocate(buffer, idx, singles_a, doubles_aa,&
+    deallocate(singles_a, doubles_aa,&
                 singles_b, doubles_bb, doubles_ab,&
-                triples, triples_case,&
-                srt_idx, all_idx)
+                triples, triples_case)!,&
+                ! srt_idx, all_idx, all_degree)
 end
 
 subroutine calc_sparse_dH(H_p, H_c, H_v, sze, nnz, dets)
@@ -2055,8 +2081,10 @@ subroutine calc_sparse_dH(H_p, H_c, H_v, sze, nnz, dets)
     ! dets is the set of (excited) determinants used to calculate the matrix entries
     END_DOC
 
-    integer :: i, j
-    integer, intent(in) :: sze, nnz, H_p(sze+1), H_c(nnz)
+    integer(kind=8) :: i, j
+    integer, intent(in) :: sze
+    integer(kind=8), intent(in) :: nnz, H_p(sze+1)
+    integer, intent(in) :: H_c(nnz)
     integer(bit_kind), intent(in) :: dets(N_int, 2, sze)
     double precision, intent(out) :: H_v(nnz)
     double precision :: hij
@@ -2144,6 +2172,7 @@ subroutine double_sort(rows, cols, n_max, row_starts, N_det_u)
     integer :: i, j, cur_row, prev_row, n_cols
     integer, allocatable :: tcols(:), sort_idx(:)
 
+    if (n_max == 0) return
 
     allocate(sort_idx(n_max), tcols(n_max))
     do i = 1, n_max
